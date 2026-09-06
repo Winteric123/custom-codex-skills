@@ -1,0 +1,4 @@
+interface:
+  display_name: "文献检索与传递"
+  short_description: "Download OA papers directly, with 聚联 as fallback"
+  default_prompt: "Use $jlyl-literature-delivery to find a paper, download lawful open-access full text directly when available, and otherwise retrieve it through 聚联."
