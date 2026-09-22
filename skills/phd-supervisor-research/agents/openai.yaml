@@ -1,0 +1,7 @@
+interface:
+  display_name: "博士导师深度检索"
+  short_description: "按地区与高校系统核验导师、跨机构任职、研究证据及分层博士机会"
+  default_prompt: "使用 $phd-supervisor-research 检索指定地区及高校的胸部肿瘤与肺癌博士导师，核验学校范围、跨机构任职、联系方式、研究产出、博士路径和分层招生机会，并输出可追溯表格与仅含事实、研究锚点、分析者推导 gap/aim、问题和风险提示的研究型交接包；不要撰写套磁信或研究计划。"
+
+policy:
+  allow_implicit_invocation: true

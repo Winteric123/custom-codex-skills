@@ -1,73 +1,68 @@
 ---
 name: wisp-codex-skill-manager
-description: Create, update, validate, and synchronize personal skills that must be available in both Codex and Wisp Science, and explain where each product stores newly authored skills. Use when the user asks to create, revise, fix, validate, install, locate, or synchronize a shared Codex/Wisp skill, including after switching models or authoring from Wisp. Do not use merely to run an existing skill.
+description: Create, reconcile, update, and verify personal skills shared by Codex and Wisp Science. Use for shared skill installation, version differences, missing Wisp skills, discovery and reload problems, or questions about where either product saves skills. Do not use merely to run an existing skill.
 ---
 
 # Wisp-Codex Skill Manager
 
-Maintain one canonical skill folder and leave Codex and Wisp on the same version after every authorized creation or update.
+Maintain one reviewed set of skill files that both products can discover. Separate the file-sharing result, Wisp's loaded catalog, and the current conversation's skill snapshot.
 
-## Storage model and synchronization direction
+## Resolve the actual arrangement first
 
-- Treat the host product and authoring workflow—not the selected AI model—as the determinant of the save location. Switching models inside Wisp does not change Wisp's skill paths.
-- A skill created or updated through Codex belongs in the canonical Codex root described below. When Wisp's `WISP_SKILLS_PATH` includes that root, Wisp discovers the same files; no second copy is required.
-- A project-local skill created through Wisp's own `skill-creator` defaults to `<current-project>/.wisp/skills/<skill-name>`.
-- Installing a Wisp project skill through **Settings -> Skills** copies it into Wisp's user skill directory. It does not install the skill into Codex.
-- `WISP_SKILLS_PATH` is a discovery setting, not a guarantee that Wisp's authoring tools can write to every configured path. Wisp file tools may be limited to the current project.
-- Describe the default arrangement accurately as **Codex-authored shared source -> Wisp discovery**. Do not claim automatic Wisp-to-Codex synchronization.
+- Use `$CODEX_HOME/skills`, otherwise `%USERPROFILE%\.codex\skills`, as the canonical Codex location. Personal skills do not belong in `.system`.
+- Inspect the existing canonical skill, Wisp global root, the active project's `.wisp/skills`, and relevant extra roots before choosing an installation method. Include scripts, references, assets and metadata when comparing copies.
+- A canonical path is a storage convention, not evidence that its contents are newer. Neither application of origin, file modification time, schema number nor number of files establishes the user's intended latest version.
+- Detect root links and compare actual directory/file identity. Equal hashes prove equal contents, not a shared file. Inspect the path Wisp actually reports; a same-name project or global skill can shadow the expected source.
 
-## Canonical layout
+On Windows, a verified whole-root junction such as `%USERPROFILE%\.wisp\skills -> %USERPROFILE%\.codex\skills` can make both products read one skill tree. Preserve unrelated skills and inspect the existing topology before changing it; never assume a recorded arrangement still matches the current machine.
 
-- Use `$CODEX_HOME/skills` when `CODEX_HOME` is set; otherwise use `%USERPROFILE%\.codex\skills`.
-- Keep each shared skill at `<canonical-root>/<skill-name>`.
-- Never create or edit a personal skill inside the canonical root's `.system` directory.
-- Prefer shared discovery over duplicate copies: configure Wisp's `WISP_SKILLS_PATH` to include the canonical root so both products read the same files.
-- Never write into Wisp's bundled installation directory or undocumented application-data directories.
+With a verified root junction, no extra copy or `WISP_SKILLS_PATH` change is needed. Wisp's **Settings -> Skills** installation target then resolves into the canonical directory, so inspect conflicts before installing over an existing skill. Do not substitute child skill-directory junctions: the observed Wisp scanner follows a linked scan root but skips linked child directories. Read [Windows sharing and recovery](references/windows-sharing.md) only when diagnosing or repairing discovery or links.
 
-## Create or update
+## Create, reconcile or update
 
-1. Resolve the target skill name and canonical path. Update an existing canonical folder in place; do not initialize it again.
-2. When the built-in `$skill-creator` is available, follow it for authoring quality, structure, metadata, and validation. This skill owns the shared path and Wisp synchronization checks.
-3. Preserve the complete skill folder, including `SKILL.md` and any intentional `agents`, `scripts`, `references`, or `assets` resources.
-4. Run the applicable Codex validator and any deterministic tests for changed scripts.
-5. Run `powershell.exe -NoProfile -ExecutionPolicy Bypass -File <manager-skill>/scripts/verify_wisp_sync.ps1 -SkillPath <canonical-skill-folder>`.
-6. Treat a successful verifier result as synchronized because Wisp reads the canonical folder directly. Do not claim synchronization when the verifier reports a missing or mismatched `WISP_SKILLS_PATH`.
-7. Report the canonical path, validation result, Wisp synchronization status, and whether Wisp must reload skills or start a new conversation.
+1. Use the built-in `$skill-creator` for skill structure and validation. For an existing shared skill, edit its current shared folder rather than initializing another copy. Switching the AI model does not change the host application's save location.
+2. If copies differ, identify meaningful instruction, script, schema and resource changes. Use authoring records when available; preserve useful changes from either side. Resolve routine additive differences directly. Ask the user only when contradictory behavior requires a preference that the conversation does not establish.
+3. Before merging or changing discovery topology, back up every distinct affected version outside all scanned skill roots. Preserve unrelated skills. Record the original locations and the chosen merged result. Never classify a copy as obsolete using timestamps alone.
+4. Write the reviewed result to the shared source. Keep existing metadata and intentional resources. If schema/tool contracts changed, explain compatibility; do not silently rewrite the user's historical cases or run newer renderers over incompatible data. Check affected task/script paths when moving a skill with scheduled execution.
+5. Run the applicable skill validator and meaningful checks for changed scripts. Reuse existing tests when their prerequisites are available. Record missing fixtures or failed launches as unexecuted/failed, not passed; do not invent research evidence to satisfy a test fixture.
+6. Verify file identity and discovery with the workflow below. A staging folder, proposed command, `-WhatIf`, or a successful copy alone is not completion.
 
-## When authoring from Wisp
+## Authoring from Wisp
 
-1. Keep the default Wisp-created skill at `<current-project>/.wisp/skills/<skill-name>` unless the user has explicitly established another writable shared source.
-2. Validate it with Wisp's bundled `skill-creator` workflow.
-3. Explain that changing the AI model does not alter this location.
-4. If the skill is only for that Wisp project, leave it project-local.
-5. If the skill must be available throughout Wisp, direct the user to install it through **Settings -> Skills** and explain that Wisp creates or manages its own installed copy.
-6. If the skill must also be available in Codex, do not report it as synchronized yet. Use an authorized Codex or filesystem workflow to place the validated skill in the canonical Codex root, resolve conflicts deliberately, and run the synchronization verifier.
-7. When both a Wisp-local folder and a canonical Codex folder exist, name the authoritative source explicitly. Never allow two independently edited copies without warning about version drift.
+- For an existing shared skill, resolve and update its shared folder when the available tool permits it. Wisp's project-local creation default is `<project>/.wisp/skills/<name>`; writing there does not automatically update the global/shared skill.
+- If the request is deliberately project-only, keep it local and report that scope. Otherwise deploy the reviewed project change through an authorized filesystem workflow and check for a same-name project copy shadowing the shared one.
+- A root junction makes the two paths expose the same files. It does not grant every Wisp tool access outside its project. A successful ACP shell or PowerShell write proves that channel's access, not the native Wisp file tool's access.
+- If direct editing is unavailable, use an available authorized channel or leave a clearly identified staged change. Do not silently maintain independent copies or promise automatic synchronization of files authored elsewhere.
 
-## True bidirectional sharing
+## Verify files, catalog and conversation separately
 
-The default configuration is not bidirectional. If the user requests authoring from either product into one shared source:
+Run the read-only [verification script](scripts/verify_wisp_sync.ps1) against the canonical skill directory:
 
-- propose a neutral user-selected directory that both products can read and write;
-- configure Wisp discovery for that directory;
-- expose the shared skill folders to Codex using a supported installation or link strategy;
-- verify actual write permissions from both products before calling the setup bidirectional;
-- preserve one authoritative copy and avoid copy-on-edit workflows.
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File '<manager>\scripts\verify_wisp_sync.ps1' -SkillPath '<canonical-root>\<skill-name>'
+```
 
-Do not silently redesign an existing installation or create filesystem links without explicit approval.
+The script checks filesystem/discovery configuration; it cannot refresh Wisp or observe its UI. It must not report Wisp loaded merely because environment variables match. A root junction can provide sharing even when `WISP_SKILLS_PATH` is absent. Script execution through the Wisp alias must still resolve the Codex canonical root correctly.
 
-## Missing Wisp configuration
+Then obtain **current evidence**, after the final file edit:
 
-If `WISP_SKILLS_PATH` does not include the canonical root:
+- Reload through Wisp **Settings -> Skills -> Reload Skills** when UI control is available. Confirm the target is listed and enabled, inspect its source path, and open its file view when confirming updated contents. A changed total skill count alone is insufficient.
+- Alternatively, use `wisp_list_skills` plus `wisp_use_skill` (or equivalent Wisp tools), and compare the returned source/content with the shared source. A tool's failure to find a newly loaded skill can be an old ACP conversation snapshot; check the current UI catalog before changing files again.
+- A UI source beneath `.wisp\skills` is valid when file identity confirms the root junction reaches the canonical skill. A separate copy with identical text is not proof of ongoing sharing.
+- Only after observing the source in Wisp, record the evidence with `-WispDiscoveryVerified -WispDiscoveryEvidence '<what was observed and when>'` and the actual source path through `-WispObservedSkillPath` (accepts the skill directory or its `SKILL.md` file). These parameters record caller-observed evidence; they do not perform the observation.
+- **Reload and a shared file do not refresh every existing conversation.** Record current-conversation loading separately. If the current ACP snapshot is stale or untested, report that the catalog is ready for a new conversation; do not claim all active chats now use the new instructions. Do not restart Wisp during an active task merely to manufacture a passing check.
+- Use `-ConversationDiscoveryVerified` only after the current conversation actually retrieves the final skill contents. UI Reload or a successful catalog check does not establish this fact.
 
-- explain that the Codex files changed but Wisp did not;
-- ask before changing the user's persistent environment;
-- when authorized, append the canonical root without deleting other configured roots;
-- tell the user to fully restart Wisp after changing the environment;
-- rerun the verifier after the configuration change.
+Keep the verification output, actual command/exit result and any UI/tool source evidence in the task's report area. Use the script's returned status and fields; an exit of 2 means verification is incomplete, even if part of the setup succeeded.
 
-Do not use a copied Wisp folder as a silent fallback. If the user explicitly requests physical mirrors, establish one authoritative source and use a separately approved one-way deployment workflow.
+When changing the verifier, run [its regression tests](tests/test_verify_wisp_sync.ps1) with `powershell.exe -NoProfile -ExecutionPolicy Bypass -File '<manager>\tests\test_verify_wisp_sync.ps1'`. Tests use synthetic skills in the OS temporary directory by default (override with `-FixtureRoot`) and do not modify the user's Wisp or Codex configuration. Retained fixtures and test reports stay outside installed skill roots.
 
-## Reload boundary
+## Completion report
 
-File synchronization does not hot-reload an already running conversation. After a successful create or update, remind the user to select **Settings -> Skills -> Reload Skills** in Wisp and start a new conversation when the updated instructions must be guaranteed.
+Report the concrete changes, exact canonical skill path, validation performed and three separate results:
+
+1. **Files:** same shared source, reconciled copies, or still separate.
+2. **Wisp catalog:** actually listed/enabled and source-verified, or not yet verified.
+3. **Current conversation:** refreshed and checked, or a new conversation is required/untested.
+
+Always end a skill creation/update with a Wisp reminder. If no shared discovery path is verified, state that Wisp has not been confirmed updated and direct the user to **Settings -> Skills**. If the shared catalog was verified, say whether Reload was already performed and remind the user to start a new conversation when existing instructions may be cached. Do not ask again for work already authorized by the user.

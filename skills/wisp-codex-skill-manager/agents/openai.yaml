@@ -1,7 +1,7 @@
 interface:
   display_name: "Wisp-Codex Skill Manager"
-  short_description: "Create and synchronize shared Codex/Wisp skills"
-  default_prompt: "Use $wisp-codex-skill-manager to create or update a skill shared by Codex and Wisp Science."
+  short_description: "Reconcile shared skills and verify Wisp loading"
+  default_prompt: "Use $wisp-codex-skill-manager to reconcile or update a shared skill and verify its files, Wisp catalog, and current conversation separately."
 
 policy:
   allow_implicit_invocation: true

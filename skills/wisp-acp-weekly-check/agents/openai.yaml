@@ -1,0 +1,4 @@
+interface:
+  display_name: "Wisp ACP 每周检查"
+  short_description: "每周核对 Wisp 实际配置的 ACP 适配器版本并生成本地报告"
+  default_prompt: "使用 $wisp-acp-weekly-check 检查 Wisp 的 ACP 是否为最新版本，并查看每周检查任务的状态。"
