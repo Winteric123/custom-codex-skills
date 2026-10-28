@@ -4,7 +4,7 @@ Five reusable personal skills for Codex and Wisp Science:
 
 - `jlyl-literature-delivery`: Search scientific literature, retrieve lawful open-access PDFs, and use 聚联文献传递 as a fallback.
 - `phd-supervisor-outreach`: Draft personalized PhD supervisor outreach emails and optionally save them to an IMAP drafts folder.
-- `phd-supervisor-research`: Research and verify prospective PhD supervisors, appointments, contacts, publications, grants, and recruitment evidence.
+- `phd-supervisor-research`: Research and verify prospective PhD supervisors, contacts, doctoral routes, application requirements, and paper-level experimental, bioinformatics, omics, and clinical-translation portfolios.
 - `wisp-acp-weekly-check`: Check the versions of ACP adapters configured in Wisp and optionally register a weekly Windows check.
 - `wisp-codex-skill-manager`: Reconcile and verify personal skills shared between Codex and Wisp while keeping one reviewed source.
 

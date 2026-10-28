@@ -15,6 +15,7 @@ from case_utils import (
     evidence_stats_line,
     load_json,
     md_cell,
+    resolve_topic_profile,
     source_links,
     unique_ids,
     visible_char_count,
@@ -32,6 +33,7 @@ OUTPUT_FILES = [
     "06-APPLICATION-READINESS.md",
     "07-SOURCE-LEDGER.md",
 ]
+OPTIONAL_CONTACT_OUTPUT = "08-CONTACT-AUDIT.md"
 
 TIER_ORDER = {"A": 0, "B": 1, "C": 2, "D": 3}
 AREA_LABELS = {
@@ -68,6 +70,88 @@ DEADLINE_TYPE_LABELS = {
     "not_stated": "官方未说明",
     "not_applicable": "不适用",
 }
+
+DOCUMENT_TYPE_LABELS = {
+    "motivation_letter": "动机信",
+    "personal_statement": "个人陈述",
+    "cover_letter": "申请附信（cover letter）",
+    "supervisor_enquiry": "导师联系/套磁",
+    "recommendation_letters": "推荐信",
+    "research_proposal": "研究计划",
+    "cv": "简历（CV）",
+    "transcripts": "成绩单",
+    "degree_certificates": "学位/毕业证明",
+    "language_test": "语言成绩",
+    "writing_sample": "写作样本",
+    "other": "其他材料",
+}
+DOCUMENT_STATUS_LABELS = {
+    "required": "必需",
+    "optional": "可选",
+    "not_required": "官方明确不要求",
+    "conditional": "满足特定条件时要求",
+    "not_public": "未公开说明",
+    "unverified": "尚未核验",
+}
+DOCUMENT_STAGE_LABELS = {
+    "pre_contact": "联系导师前/联系阶段",
+    "initial_application": "首次正式申请",
+    "after_shortlisting": "入围后",
+    "after_offer": "录取后",
+    "not_stated": "未说明阶段",
+}
+DOCUMENT_SUBMITTER_LABELS = {
+    "applicant": "申请人",
+    "referee": "推荐人",
+    "not_stated": "未说明提交者",
+}
+ARCHIVED_OPPORTUNITY_STATUSES = {"closed_expired", "historical_only"}
+
+
+def document_requirements(record: dict) -> list[dict]:
+    """Return optional structured material rules without reinterpreting legacy text."""
+    readiness = record.get("applicationReadiness", {})
+    if not isinstance(readiness, dict):
+        return []
+    items = readiness.get("documentRequirements", [])
+    if not isinstance(items, list):
+        return []
+    return [item for item in items if isinstance(item, dict)]
+
+
+def document_route_map(record: dict) -> dict[str, dict]:
+    opportunities = record.get("opportunities", [])
+    if not isinstance(opportunities, list):
+        return {}
+    return {
+        str(item.get("id")): item
+        for item in opportunities
+        if isinstance(item, dict) and item.get("id")
+    }
+
+
+def missing_current_document_audit(record: dict) -> bool:
+    """Archived routes do not trigger a missing current-materials audit warning."""
+    routes = document_route_map(record)
+    requirements = document_requirements(record)
+    if routes:
+        current_route_ids = {
+            route_id for route_id, route in routes.items()
+            if route.get("status") not in ARCHIVED_OPPORTUNITY_STATUSES
+        }
+        audited_route_ids = {str(item.get("routeId") or "") for item in requirements}
+        return bool(current_route_ids - audited_route_ids)
+    return not requirements and record.get("opportunityStatus") not in ARCHIVED_OPPORTUNITY_STATUSES
+
+
+def document_route_name(route_id: str, route: dict) -> str:
+    name = str(route.get("routeName") or route_id or "未标明申请路径")
+    if route_id and name != route_id:
+        name = f"{name} ({route_id})"
+    status = route.get("status")
+    if status in ARCHIVED_OPPORTUNITY_STATUSES:
+        name += f"；路径状态：{OPPORTUNITY_LABELS.get(status, status)} ({status})"
+    return name
 
 
 def record_verification_is_stale(record: dict, case: dict) -> bool:
@@ -110,13 +194,24 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def load_case(case_dir: Path) -> tuple[dict, list[dict], list[dict], list[dict], list[dict]]:
+def output_files(case_dir: Path) -> list[str]:
+    files = list(OUTPUT_FILES)
+    if (case_dir / "data" / "contact-audit.json").exists():
+        files.append(OPTIONAL_CONTACT_OUTPUT)
+    return files
+
+
+def load_case(
+    case_dir: Path,
+) -> tuple[dict, list[dict], list[dict], list[dict], list[dict], dict | None]:
     data_dir = case_dir / "data"
     case = load_json(data_dir / "case.json")
     schools = load_json(data_dir / "schools.json")
     coverage = load_json(data_dir / "coverage.json")
     records = load_json(data_dir / "records.json")
     sources = load_json(data_dir / "sources.json")
+    contact_audit_path = data_dir / "contact-audit.json"
+    contact_audit = load_json(contact_audit_path) if contact_audit_path.exists() else None
     if not isinstance(case, dict):
         raise ValueError("case.json must contain an object")
     for name, value in [
@@ -127,7 +222,9 @@ def load_case(case_dir: Path) -> tuple[dict, list[dict], list[dict], list[dict],
     ]:
         if not isinstance(value, list):
             raise ValueError(f"{name} must contain an array")
-    return case, schools, coverage, records, sources
+    if contact_audit is not None and not isinstance(contact_audit, dict):
+        raise ValueError("contact-audit.json must contain an object")
+    return case, schools, coverage, records, sources, contact_audit
 
 
 def nested_source_ids(value: object) -> list[str]:
@@ -249,6 +346,26 @@ def warning_lines(case: dict, coverage: list[dict], records: list[dict]) -> list
                 for record in evidence_exceptions
             )
         )
+    material_records = [record for record in records if record.get("priorityTier") in {"A", "B", "C"}]
+    missing_material_checks = [record for record in material_records if missing_current_document_audit(record)]
+    if missing_material_checks:
+        warnings.append(
+            f"{len(missing_material_checks)} 位 A/B/C 类候选人至少一条当前申请路径未按新材料清单核验；"
+            "不得据此视为不需要动机信、导师联系、推荐信或其他申请材料。"
+        )
+    unresolved_material_checks = [
+        (record, item)
+        for record in material_records
+        for item in document_requirements(record)
+        if item.get("requirementStatus") in {"not_public", "unverified"}
+        and document_route_map(record).get(str(item.get("routeId") or ""), {}).get("status")
+        not in ARCHIVED_OPPORTUNITY_STATUSES
+    ]
+    if unresolved_material_checks:
+        warnings.append(
+            f"{len(unresolved_material_checks)} 项申请材料要求尚未公开说明或尚未核验；"
+            "使用前需按对应申请路径确认。"
+        )
     return warnings
 
 
@@ -260,6 +377,8 @@ def common_header(title: str, case: dict, sources: list[dict]) -> list[str]:
         f"- 研究主题：{case.get('topic', '—')}",
         f"- 核验日期：{case.get('asOf', '—')}",
     ]
+    if resolve_topic_profile(case) == "cv_aligned_oncology":
+        lines.append("- 主题证据范围：cv_aligned_oncology（T1–T4 按已声明的 CV 肿瘤学范围判定）")
     if case.get("intake"):
         lines.append(f"- 目标入学：{case['intake']}")
     lines.extend(["", evidence_stats_line(sources), ""])
@@ -516,6 +635,7 @@ def render_index(
     coverage: list[dict],
     records: list[dict],
     sources: list[dict],
+    contact_audit: dict | None,
 ) -> None:
     tiers = Counter(str(item.get("priorityTier", "unclassified")) for item in records)
     warnings = warning_lines(case, coverage, records)
@@ -574,11 +694,21 @@ def render_index(
         "03-COVERAGE-MATRIX.md": "跨学院检索覆盖矩阵",
         "04-EVIDENCE-CONFLICTS.md": "冲突、中文互联网与小红书核验",
         "05-A-TIER-DEEP-PROFILES.md": "A 类导师研究方向深描",
-        "06-APPLICATION-READINESS.md": "申请准备信息（非套磁信、非研究计划）",
+        "06-APPLICATION-READINESS.md": "A/B/C 类申请材料清单与 A 类申请准备信息（非材料撰写）",
         "07-SOURCE-LEDGER.md": "全部来源台账",
+        "08-CONTACT-AUDIT.md": "联系方式归属、时效、官方优先检索顺序与首选渠道审计",
     }
-    for filename in OUTPUT_FILES[1:]:
+    for filename in output_files(case_dir)[1:]:
         lines.append(f"- [{filename}]({filename})：{descriptions[filename]}")
+    if contact_audit is not None:
+        contact_records = contact_audit.get("records", [])
+        contact_count = len(contact_records) if isinstance(contact_records, list) else 0
+        lines.extend(
+            [
+                "",
+                f"- 联系方式补充审计：{contact_count} 位候选人；详见 `08-CONTACT-AUDIT.md`。",
+            ]
+        )
     lines.extend(["", "## 未解决事项与限制", ""])
     if warnings:
         lines.extend(f"- {item}" for item in warnings)
@@ -1095,6 +1225,104 @@ def render_deep_profiles(
     write_text(case_dir / "05-A-TIER-DEEP-PROFILES.md", lines)
 
 
+def render_document_requirements_matrix(
+    lines: list[str],
+    case: dict,
+    records: list[dict],
+    source_map: dict[str, dict],
+) -> None:
+    """Render route-bound material facts for all viable tiers before A-tier detail."""
+    lines.extend(
+        [
+            "## A/B/C 类导师申请材料清单",
+            "",
+            "材料要求按对应申请路径记录；项目要求不自动等同于导师本人要求。"
+            "动机信、个人陈述、申请附信、导师联系/套磁和推荐信分别核验。"
+            "“未公开说明”“尚未核验”或缺少历史字段均不能解释为“不要求”。",
+            "已关闭或仅历史路径不产生当前材料核验缺项；如保留其已记录材料，路径名称会标明历史/关闭状态。",
+            "",
+            "| 导师（ID）/分级 | 申请路径 | 材料类型 | 要求状态 | 提交阶段/数量/提交者 | 内容、格式与提交方式 | 核查日期 | 来源 |",
+            "|---|---|---|---|---|---|---|---|",
+        ]
+    )
+    viable_records = sorted(
+        [record for record in records if record.get("priorityTier") in {"A", "B", "C"}],
+        key=lambda record: (
+            TIER_ORDER.get(record.get("priorityTier"), 9),
+            record.get("schoolId", ""),
+            record.get("name", ""),
+        ),
+    )
+    for record in viable_records:
+        route_map = document_route_map(record)
+        requirements = document_requirements(record)
+        identity = f"{record.get('name') or '—'} ({record.get('id') or '—'}) / {record.get('priorityTier')}"
+        represented_routes: set[str] = set()
+        for item in requirements:
+            route_id = str(item.get("routeId") or "")
+            route = route_map.get(route_id, {})
+            route_name = document_route_name(route_id, route)
+            if route_id:
+                represented_routes.add(route_id)
+            quantity = item.get("quantity")
+            quantity_text = f"{quantity} 份" if isinstance(quantity, int) and not isinstance(quantity, bool) else "数量未说明"
+            stage = DOCUMENT_STAGE_LABELS.get(item.get("submissionStage"), item.get("submissionStage") or "未说明阶段")
+            submitter = DOCUMENT_SUBMITTER_LABELS.get(item.get("submitter"), item.get("submitter") or "未说明提交者")
+            rules = [str(item.get("summary") or "未记录具体规则")]
+            rules.append("格式/长度：" + str(item.get("formatAndLength") or "未公开说明"))
+            rules.append("提交方式：" + str(item.get("submissionMethod") or "未公开说明"))
+            checked_at = str(item.get("checkedAt") or "未记录核查日期")
+            if dated_object_is_stale(item, case):
+                checked_at += "；核验已陈旧，使用前需复核"
+            lines.append(
+                "| "
+                + " | ".join(
+                    md_cell(value)
+                    for value in [
+                        identity,
+                        route_name,
+                        DOCUMENT_TYPE_LABELS.get(item.get("materialType"), item.get("materialType") or "未标明材料类型"),
+                        DOCUMENT_STATUS_LABELS.get(item.get("requirementStatus"), item.get("requirementStatus") or "尚未核验"),
+                        f"{stage}；{quantity_text}；{submitter}",
+                        "；".join(rules),
+                        checked_at,
+                        source_links(item.get("sourceIds", []), source_map),
+                    ]
+                )
+                + " |"
+            )
+        unchecked_routes = [
+            (route_id, route)
+            for route_id, route in route_map.items()
+            if route_id not in represented_routes
+            and route.get("status") not in ARCHIVED_OPPORTUNITY_STATUSES
+        ]
+        if not requirements and not route_map and record.get("opportunityStatus") not in ARCHIVED_OPPORTUNITY_STATUSES:
+            unchecked_routes = [("", {"routeName": record.get("doctoralRoute") or "未标明申请路径"})]
+        for route_id, route in unchecked_routes:
+            route_name = document_route_name(route_id, route)
+            lines.append(
+                "| "
+                + " | ".join(
+                    md_cell(value)
+                    for value in [
+                        identity,
+                        route_name,
+                        "材料清单未分项核验",
+                        "未按新材料清单核验",
+                        "未按新材料清单核验",
+                        "历史概括文字不替代路径级材料核验；缺失不代表不要求。",
+                        "—",
+                        "—",
+                    ]
+                )
+                + " |"
+            )
+    if not viable_records:
+        lines.append("| — | — | — | 当前没有 A/B/C 类候选人 | — | — | — | — |")
+    lines.append("")
+
+
 def render_application_readiness(
     case_dir: Path,
     case: dict,
@@ -1102,7 +1330,7 @@ def render_application_readiness(
     source_map: dict[str, dict],
     sources: list[dict],
 ) -> None:
-    lines = common_header("A 类导师申请准备信息", case, sources)
+    lines = common_header("申请材料要求与 A 类导师申请准备信息", case, sources)
     lines.extend(
         [
             "本文件是研究型申请准备的边界化交接包。researchAnchor 是从可核验研究证据中选出的锚点；"
@@ -1112,6 +1340,8 @@ def render_application_readiness(
             "",
         ]
     )
+    render_document_requirements_matrix(lines, case, records, source_map)
+    lines.extend(["## A 类导师申请准备详情", ""])
     a_records = sorted(
         [item for item in records if item.get("priorityTier") == "A"],
         key=lambda item: (item.get("schoolId", ""), item.get("name", "")),
@@ -1132,7 +1362,7 @@ def render_application_readiness(
         recruitment_audit = recruitment_audit_text(record, source_map)
         lines.extend(
             [
-                f"## {index}. {record.get('name', '—')}",
+                f"### {index}. {record.get('name', '—')}",
                 "",
                 f"- 记录 ID：{record.get('id', '—')}",
                 f"- 逐记录核验日期：{record.get('verifiedAt', '—')}",
@@ -1159,7 +1389,7 @@ def render_application_readiness(
                 f"- proposedAim（分析者推导，不是获批课题）：{ready.get('proposedAim') or '—'}",
                 f"- 一般匹配背景（分析者推导，非申请人个人匹配结论）：{readiness_claim('generalApplicantFit')}",
                 "",
-                "### 需要向项目或导师确认的问题",
+                "#### 需要向项目或导师确认的问题",
                 "",
             ]
         )
@@ -1173,7 +1403,7 @@ def render_application_readiness(
         lines.extend(f"- {item}" for item in questions)
         if not questions:
             lines.append("- —")
-        lines.extend(["", "### 注意事项", ""])
+        lines.extend(["", "#### 注意事项", ""])
         cautions = ready.get("cautions", [])
         if isinstance(cautions, list) and cautions:
             lines.extend(f"- {item}" for item in cautions)
@@ -1184,7 +1414,7 @@ def render_application_readiness(
         lines.extend(
             [
                 "",
-                "### 相关证据",
+                "#### 相关证据",
                 "",
                 source_links(
                     unique_ids(
@@ -1197,6 +1427,7 @@ def render_application_readiness(
                         ready.get("applicationSourceIds"),
                         ready.get("proposalSourceIds"),
                         ready.get("fundingSourceIds"),
+                        nested_source_ids(ready.get("documentRequirements", [])),
                         nested_source_ids(record.get("opportunities", [])),
                         nested_source_ids(record.get("recruitmentAudit", {})),
                     ),
@@ -1254,13 +1485,189 @@ def render_source_ledger(
     write_text(case_dir / "07-SOURCE-LEDGER.md", lines)
 
 
+def render_contact_audit(
+    case_dir: Path,
+    case: dict,
+    records: list[dict],
+    contact_audit: dict | None,
+    source_map: dict[str, dict],
+    sources: list[dict],
+) -> None:
+    if contact_audit is None:
+        return
+
+    channel_type_labels = {
+        "personal_email": "本人邮箱",
+        "clinical_email": "本人临床邮箱",
+        "publication_correspondence_email": "论文通讯邮箱（仅论文时点）",
+        "group_email": "课题组邮箱",
+        "unit_email": "研究单元邮箱",
+        "department_mailbox": "院系／科室邮箱",
+        "secretariat_email": "秘书处邮箱",
+        "assistant_contact": "助理联系人",
+        "phone": "电话",
+        "contact_form": "联系表单",
+        "not_public": "未发现公开渠道",
+    }
+    owner_labels = {
+        "candidate": "导师本人",
+        "assistant": "助理",
+        "group": "课题组",
+        "unit": "研究单元",
+        "department": "院系／科室",
+        "secretariat": "秘书处",
+        "institution": "机构",
+        "unclear": "归属未明确",
+    }
+    currentness_labels = {
+        "current_official": "当前官方",
+        "publication_time_only": "仅论文发表时点",
+        "former_institution": "原机构",
+        "currentness_unverified": "当前性未核实",
+        "historical": "历史渠道",
+        "not_public": "未公开",
+    }
+    stage_labels = {
+        "current_official_primary": "当前官方主路径",
+        "current_official_fallback": "当前官方备用路径",
+        "publication": "论文通讯信息",
+        "researcher_controlled": "研究者自管页面（线索）",
+        "other": "其他核查",
+    }
+    policy_labels = {
+        "explicitly_supported": "官方明确支持该联系路径",
+        "explicitly_discouraged": "官方明确不建议主动联系",
+        "restricted_to_route": "仅限指定联系路径",
+        "not_stated": "官方未说明主动联系许可",
+    }
+    record_map = {str(item.get("id")): item for item in records if item.get("id")}
+    lines = common_header("导师联系方式补充审计", case, sources)
+    lines.extend(
+        [
+            f"- 补充审计版本：{contact_audit.get('schemaVersion') or '—'}",
+            f"- 总体核查日期：{contact_audit.get('checkedAt') or '—'}",
+            "",
+            "本表区分联系人归属与当前性。公开联系方式不自动表示导师允许未经邀请的邮件；论文通讯邮箱也不自动等于当前官方邮箱。",
+            "",
+        ]
+    )
+
+    audit_records = contact_audit.get("records", [])
+    if not isinstance(audit_records, list) or not audit_records:
+        lines.append("当前补充审计没有候选人记录。")
+        write_text(case_dir / OPTIONAL_CONTACT_OUTPUT, lines)
+        return
+
+    for index, audit_record in enumerate(audit_records, start=1):
+        if not isinstance(audit_record, dict):
+            continue
+        candidate_id = str(audit_record.get("candidateId") or "")
+        candidate = record_map.get(candidate_id, {})
+        candidate_name = str(candidate.get("name") or candidate_id or "未标明候选人")
+        lines.extend(
+            [
+                f"## {index}. {candidate_name}",
+                "",
+                f"- 候选人 ID：`{candidate_id or '—'}`",
+                f"- 联系方式核查日期：{audit_record.get('checkedAt') or '—'}",
+                f"- 当前机构：{audit_record.get('currentInstitutionZh') or '未核实'}",
+                f"- 联系许可边界：{policy_labels.get(audit_record.get('contactPolicy'), audit_record.get('contactPolicy') or '未核实')}",
+                f"- 风险提示：{audit_record.get('cautionZh') or '未记录额外提示'}",
+                "",
+                "### 官方优先检索顺序",
+                "",
+                "| 顺序 | 检索阶段 | 路径类型 | 结果 | 来源 |",
+                "|---|---|---|---|---|",
+            ]
+        )
+        search_audit = audit_record.get("searchAudit", {})
+        steps = search_audit.get("steps", []) if isinstance(search_audit, dict) else []
+        if isinstance(steps, list) and steps:
+            for step_index, step in enumerate(steps, start=1):
+                if not isinstance(step, dict):
+                    continue
+                lines.append(
+                    "| "
+                    + " | ".join(
+                        [
+                            str(step_index),
+                            md_cell(stage_labels.get(step.get("stage"), step.get("stage") or "—")),
+                            md_cell(step.get("routeType") or "—"),
+                            md_cell(step.get("resultZh") or "—"),
+                            md_cell(source_links(step.get("sourceIds", []), source_map)),
+                        ]
+                    )
+                    + " |"
+                )
+        else:
+            lines.append("| — | — | — | 未记录检索步骤 | — |")
+        exhausted = (
+            search_audit.get("officialFallbacksExhaustedBeforePublication")
+            if isinstance(search_audit, dict)
+            else None
+        )
+        lines.extend(
+            [
+                "",
+                "- 论文检索前已完成适用的官方备用路径检查："
+                + ("是" if exhausted is True else "否或未核实"),
+                "",
+                "### 公开渠道",
+                "",
+                "| 渠道 ID | 类型 | 值 | 归属 | 当前性 | 本人绑定 | 来源 | 说明 |",
+                "|---|---|---|---|---|---|---|---|",
+            ]
+        )
+        channels = audit_record.get("channels", [])
+        if isinstance(channels, list) and channels:
+            for channel in channels:
+                if not isinstance(channel, dict):
+                    continue
+                channel_type = str(channel.get("type") or "")
+                value = channel.get("value") or ("未发现公开渠道" if channel_type == "not_public" else "—")
+                lines.append(
+                    "| "
+                    + " | ".join(
+                        [
+                            md_cell(channel.get("channelId") or "—"),
+                            md_cell(channel_type_labels.get(channel_type, channel_type or "—")),
+                            md_cell(value),
+                            md_cell(owner_labels.get(channel.get("owner"), channel.get("owner") or "—")),
+                            md_cell(currentness_labels.get(channel.get("currentness"), channel.get("currentness") or "—")),
+                            md_cell("是" if channel.get("candidateBound") is True else "否或未核实"),
+                            md_cell(source_links(channel.get("sourceIds", []), source_map)),
+                            md_cell(channel.get("notesZh") or "—"),
+                        ]
+                    )
+                    + " |"
+                )
+        else:
+            lines.append("| — | — | — | — | — | — | — | 未记录渠道 |")
+
+        preferred = audit_record.get("preferredRoute")
+        if isinstance(preferred, dict):
+            lines.extend(
+                [
+                    "",
+                    f"- 首选渠道 ID：`{preferred.get('preferredChannelId') or '—'}`",
+                    f"- 选择理由：{preferred.get('reasonZh') or '—'}",
+                    "- 发送前同日复核：" + ("需要" if preferred.get("sameDayRecheckRequired") is True else "不需要"),
+                    "",
+                ]
+            )
+        else:
+            lines.extend(["", "- 首选渠道：无（仅 `not_public` 时允许）。", ""])
+
+    write_text(case_dir / OPTIONAL_CONTACT_OUTPUT, lines)
+
+
 def main() -> int:
     args = parse_args()
     case_dir = Path(args.case_dir).expanduser().resolve()
-    case, schools, coverage, records, sources = load_case(case_dir)
+    case, schools, coverage, records, sources, contact_audit = load_case(case_dir)
     source_map = {str(item.get("id")): item for item in sources if item.get("id")}
 
-    render_index(case_dir, case, schools, coverage, records, sources)
+    render_index(case_dir, case, schools, coverage, records, sources, contact_audit)
     render_school_scope(case_dir, case, schools, source_map, sources)
     render_supervisors(case_dir, case, schools, records, source_map, sources)
     render_coverage(case_dir, case, schools, coverage, records, source_map, sources)
@@ -1268,6 +1675,7 @@ def main() -> int:
     render_deep_profiles(case_dir, case, records, source_map, sources)
     render_application_readiness(case_dir, case, records, source_map, sources)
     render_source_ledger(case_dir, case, sources)
+    render_contact_audit(case_dir, case, records, contact_audit, source_map, sources)
 
     stats = evidence_stats(sources)
     tiers = Counter(str(item.get("priorityTier", "unclassified")) for item in records)
@@ -1276,7 +1684,7 @@ def main() -> int:
             {
                 "status": "rendered",
                 "caseDir": str(case_dir),
-                "files": OUTPUT_FILES,
+                "files": output_files(case_dir),
                 "schools": len(schools),
                 "candidates": len(records),
                 "tierCounts": {tier: tiers.get(tier, 0) for tier in ["A", "B", "C", "D"]},

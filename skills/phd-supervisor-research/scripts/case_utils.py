@@ -10,6 +10,78 @@ from pathlib import Path
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 
+DEFAULT_TOPIC_PROFILE = "lung_cancer"
+TOPIC_PROFILES = {"lung_cancer", "cv_aligned_oncology"}
+DEFAULT_TOPIC_BY_PROFILE = {
+    "lung_cancer": "thoracic oncology, especially lung cancer",
+    "cv_aligned_oncology": (
+        "CV-aligned oncology: translational genetics/genomics, cancer multi-omics and molecular biology, "
+        "tumour immunity and immunometabolism, precision oncology, clinical cancer biomarkers, "
+        "and cancer genetic epidemiology"
+    ),
+}
+# These patterns detect an oncology anchor, not candidate eligibility. Retain
+# historical schema-1.2 semantics; apply candidate-exclusions.md manually before
+# scoring a current candidate, including dominant disease-focus exclusions and
+# core or parallel nuclear-medicine/imaging exclusions.
+DIRECT_TOPIC_ANCHOR_PATTERNS = {
+    "lung_cancer": re.compile(
+        r"(?i)\b(?:lung|thoracic|nsclc|sclc|mesothelioma)\b|"
+        r"(?:肺癌|肺肿瘤|胸部肿瘤|胸膜间皮瘤|间皮瘤)"
+    ),
+    "cv_aligned_oncology": re.compile(
+        r"(?i)\b(?:cancers?|tumou?rs?|oncolog(?:y|ical|ic)|neoplasms?|"
+        r"malignan(?:t|cy|cies)|carcinomas?|melanomas?|leuk(?:a)?emias?|"
+        r"lymphomas?|myelomas?|mesotheliomas?|sarcomas?|gliomas?|glioblastomas?|"
+        r"neuroblastomas?|nsclc|sclc)\b|"
+        r"(?:肿瘤|癌|白血病|淋巴瘤|骨髓瘤|肉瘤|间皮瘤)"
+    ),
+}
+NEGATED_LUNG_ANCHOR_PATTERNS = [
+    re.compile(
+        r"(?i)\bnot(?:\s+(?:a|an|the))?\s*"
+        r"(?:personal\s+)?(?:lung|thoracic|nsclc|sclc)"
+        r"(?:[-\s]+(?:cancer|tumou?r|oncology|focus|line|topic))?\b"
+    ),
+    # "Non-lung tumour" positively describes a tumour at another site;
+    # discard only the anatomical exclusion, retaining its tumour anchor.
+    re.compile(r"(?i)\bnon[-\s]+(?:lung|thoracic|nsclc|sclc)\b"),
+    re.compile(
+        r"(?i)\b(?:lung|thoracic|nsclc|sclc)\b[^.;\n]{0,30}"
+        r"\b(?:is|are)\s+not\b[^.;\n]{0,20}\b(?:focus|line|topic|research)\b"
+    ),
+    re.compile(
+        r"(?:肺癌|肺肿瘤|胸部肿瘤|胸部肿瘤学|NSCLC|SCLC)"
+        r"[^。；;\n]{0,20}(?:并非|不是|不属于)[^。；;\n]{0,16}(?:主线|方向|重点|课题|研究)"
+    ),
+    re.compile(
+        r"(?:并非|不是|不属于)[^。；;\n]{0,12}"
+        r"(?:肺癌|肺肿瘤|胸部肿瘤|胸部肿瘤学|NSCLC|SCLC)"
+    ),
+    re.compile(r"非(?!小细胞)(?:肺癌|肺肿瘤|胸部肿瘤|胸部肿瘤学)"),
+]
+
+
+def resolve_topic_profile(case: dict) -> str:
+    """Missing metadata retains legacy lung semantics; explicit invalid values fail."""
+    profile = case.get("topicProfile", DEFAULT_TOPIC_PROFILE)
+    if not isinstance(profile, str) or profile not in TOPIC_PROFILES:
+        raise ValueError("case.json topicProfile must be lung_cancer or cv_aligned_oncology")
+    return profile
+
+
+def topic_has_direct_anchor(topic_profile: str, *values: object) -> bool:
+    """Screen source text for a declared-topic anchor, without inferring scientific fit."""
+    profile = resolve_topic_profile({"topicProfile": topic_profile})
+    text = "\n".join(str(value or "") for value in values)
+    if profile == "cv_aligned_oncology":
+        # Excluding lung research does not exclude other oncology, but that
+        # exclusion alone is not positive evidence of another cancer topic.
+        for pattern in NEGATED_LUNG_ANCHOR_PATTERNS:
+            text = pattern.sub("", text)
+    return bool(DIRECT_TOPIC_ANCHOR_PATTERNS[profile].search(text))
+
+
 SOURCE_TYPES = {
     "official_ranking",
     "official_research_profile",

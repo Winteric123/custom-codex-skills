@@ -20,6 +20,7 @@ from case_utils import (
     DEADLINE_TYPES,
     DISCOVERY_PASS_TYPES,
     DIRECT_RESEARCH_SOURCE_TYPES,
+    DEFAULT_TOPIC_PROFILE,
     OPPORTUNITY_SCOPES,
     OPPORTUNITY_STATUSES,
     SOURCE_AUTHORITY_CLASSES,
@@ -30,6 +31,8 @@ from case_utils import (
     evidence_stats,
     evidence_stats_line,
     load_json,
+    resolve_topic_profile,
+    topic_has_direct_anchor,
     visible_char_count,
 )
 
@@ -44,6 +47,7 @@ OUTPUT_FILES = [
     "06-APPLICATION-READINESS.md",
     "07-SOURCE-LEDGER.md",
 ]
+OPTIONAL_CONTACT_OUTPUT = "08-CONTACT-AUDIT.md"
 DATA_FILES = [
     "case.json",
     "schools.json",
@@ -86,6 +90,39 @@ CONTACT_TYPES = {
     "not_public",
 }
 CONTACT_STATUSES = {"published_current", "published_historical", "not_public", "unclear"}
+STRICT_CONTACT_KEYS = {"type", "value", "status", "sourceIds"}
+CONTACT_AUDIT_TYPES = CONTACT_TYPES | {"publication_correspondence_email"}
+CONTACT_AUDIT_OWNERS = {
+    "candidate",
+    "assistant",
+    "group",
+    "unit",
+    "department",
+    "secretariat",
+    "institution",
+    "unclear",
+}
+CONTACT_AUDIT_CURRENTNESS = {
+    "current_official",
+    "publication_time_only",
+    "former_institution",
+    "currentness_unverified",
+    "historical",
+    "not_public",
+}
+CONTACT_AUDIT_STAGES = {
+    "current_official_primary",
+    "current_official_fallback",
+    "publication",
+    "researcher_controlled",
+    "other",
+}
+CONTACT_AUDIT_POLICIES = {
+    "explicitly_supported",
+    "explicitly_discouraged",
+    "restricted_to_route",
+    "not_stated",
+}
 TOPIC_CODES = {"T1", "T2", "T3", "T4"}
 SUPERVISION_CODES = {"S1", "S2", "S3", "S4"}
 SUPERVISION_BASIS_TYPES = {
@@ -227,6 +264,20 @@ AFFILIATED_RELATIONSHIP_TYPES = {
     "multi_institutional_cancer_centre",
 }
 TIERS = {"A", "B", "C", "D"}
+APPLICATION_MATERIAL_TYPES = {
+    "motivation_letter", "personal_statement", "cover_letter", "supervisor_enquiry",
+    "recommendation_letters", "research_proposal", "cv", "transcripts",
+    "degree_certificates", "language_test", "writing_sample", "other",
+}
+APPLICATION_MATERIAL_STATUSES = {
+    "required", "optional", "not_required", "conditional", "not_public", "unverified",
+}
+APPLICATION_MATERIAL_STAGES = {
+    "pre_contact", "initial_application", "after_shortlisting", "after_offer", "not_stated",
+}
+CORE_APPLICATION_MATERIAL_TYPES = {
+    "motivation_letter", "supervisor_enquiry", "recommendation_letters", "research_proposal",
+}
 SOURCE_TOPIC_RELEVANCE = {"direct", "adjacent", "background", "not_applicable"}
 SOURCE_STATUSES = {"current", "future", "historical", "closed", "unclear"}
 EXPLICIT_MISSING_MARKERS = {
@@ -301,6 +352,24 @@ DIRECT_TOPIC_NEGATION_PATTERNS = [
     ),
     # Do not confuse 非小细胞肺癌 (NSCLC) with a negated lung-cancer claim.
     re.compile(r"非(?!小细胞)(?:肺癌|肺肿瘤|胸部肿瘤|胸部肿瘤学)"),
+]
+
+ONCOLOGY_TOPIC_NEGATION_PATTERNS = [
+    re.compile(
+        r"(?i)\b(?:not|non[-\s]+)(?:\s+(?:a|an|the))?\s*"
+        r"(?:cancer|oncolog(?:y|ical|ic)|tumou?r|malignan(?:t|cy|cies))"
+        r"(?:[-\s]+(?:research|study|work|focus|line|topic|related))?\b"
+    ),
+    re.compile(
+        r"(?i)\b(?:cancer|oncolog(?:y|ical|ic)|tumou?r)\b[^.;]{0,30}"
+        r"\b(?:is|are)\s+not\b[^.;]{0,20}\b(?:focus|line|topic|research)\b"
+    ),
+    re.compile(
+        r"(?:癌症|肿瘤|肿瘤学)[^。；;]{0,20}"
+        r"(?:并非|不是|不属于)[^。；;]{0,16}(?:主线|方向|重点|课题|研究)"
+    ),
+    re.compile(r"(?:并非|不是|不属于)[^。；;]{0,12}(?:癌症|肿瘤|肿瘤学)"),
+    re.compile(r"非(?:癌症|肿瘤|肿瘤学)"),
 ]
 
 CANDIDATES_FOUND_NEGATION_PATTERNS = [
@@ -383,7 +452,20 @@ def load_inputs(case_dir: Path, report: Report) -> dict[str, object]:
             values[filename] = load_json(path)
         except (OSError, json.JSONDecodeError) as exc:
             report.error(f"Cannot parse data/{filename}: {exc}")
+    optional_contact_path = data_dir / "contact-audit.json"
+    if optional_contact_path.exists():
+        try:
+            values["contact-audit.json"] = load_json(optional_contact_path)
+        except (OSError, json.JSONDecodeError) as exc:
+            report.error(f"Cannot parse data/contact-audit.json: {exc}")
     return values
+
+
+def expected_output_files(case_dir: Path) -> list[str]:
+    files = list(OUTPUT_FILES)
+    if (case_dir / "data" / "contact-audit.json").exists():
+        files.append(OPTIONAL_CONTACT_OUTPUT)
+    return files
 
 
 def require_list(name: str, value: object, report: Report) -> list[dict]:
@@ -703,9 +785,16 @@ def person_role_label_conflict(role_type: str, exact_label: str) -> str:
     return ""
 
 
-def explicitly_negates_direct_topic(*values: object) -> bool:
+def explicitly_negates_direct_topic(
+    *values: object, topic_profile: str = DEFAULT_TOPIC_PROFILE
+) -> bool:
     text = "\n".join(str(value or "") for value in values)
-    return any(pattern.search(text) for pattern in DIRECT_TOPIC_NEGATION_PATTERNS)
+    patterns = (
+        ONCOLOGY_TOPIC_NEGATION_PATTERNS
+        if topic_profile == "cv_aligned_oncology"
+        else DIRECT_TOPIC_NEGATION_PATTERNS
+    )
+    return any(pattern.search(text) for pattern in patterns)
 
 
 def iter_string_values(value: object, path: str):
@@ -815,6 +904,14 @@ def validate_references(
 def validate_case_metadata(case: dict, strict: bool, report: Report) -> dt.date | None:
     if case.get("schemaVersion") != "1.2":
         report.error("case.json schemaVersion must be 1.2")
+    if "applicationMaterialsAuditRequired" in case and not isinstance(
+        case["applicationMaterialsAuditRequired"], bool
+    ):
+        report.error("case.json applicationMaterialsAuditRequired must be a boolean")
+    try:
+        resolve_topic_profile(case)
+    except ValueError as exc:
+        report.error(str(exc))
     for field in ["location", "topic", "asOf", "scopeMode", "status"]:
         if not str(case.get(field, "")).strip():
             report.error(f"case.json missing {field}")
@@ -1037,7 +1134,8 @@ def validate_case_metadata(case: dict, strict: bool, report: Report) -> dt.date 
 
 
 def validate_sources(
-    sources: list[dict], as_of: dt.date | None, strict: bool, report: Report
+    sources: list[dict], as_of: dt.date | None, strict: bool, report: Report,
+    topic_profile: str = DEFAULT_TOPIC_PROFILE,
 ) -> dict[str, dict]:
     source_map = check_unique_ids("source", sources, report)
     canonical_urls: defaultdict[str, list[str]] = defaultdict(list)
@@ -1105,10 +1203,24 @@ def validate_sources(
             if role_conflict:
                 report.error(f"{path}.exactLabel contradicts roleType={role_type}: {role_conflict}")
             if topic_relevance == "direct" and explicitly_negates_direct_topic(
-                exact_label, source.get("claim", "")
+                exact_label, source.get("claim", ""), topic_profile=topic_profile
+            ):
+                negation_kind = (
+                    "non-oncology" if topic_profile == "cv_aligned_oncology" else "non-lung"
+                )
+                report.error(
+                    f"{path}.topicRelevance=direct conflicts with an explicit {negation_kind}/topic-negation statement"
+                )
+            if (
+                topic_profile == "cv_aligned_oncology"
+                and topic_relevance == "direct"
+                and not topic_has_direct_anchor(
+                    topic_profile, source.get("claim", ""), source.get("title", ""), exact_label
+                )
             ):
                 report.error(
-                    f"{path}.topicRelevance=direct conflicts with an explicit non-lung/topic-negation statement"
+                    f"{path}.topicRelevance=direct requires a source-specific cancer/oncology anchor; "
+                    "generic immunology, omics, or methods alone cannot establish CV-oncology relevance"
                 )
             if (
                 strict
@@ -1363,13 +1475,7 @@ def validate_sources(
                 has_research_statement = any(
                     pattern.search(source_text) for pattern in EXPLICIT_RESEARCH_STATEMENT_PATTERNS
                 )
-                has_direct_topic = bool(
-                    re.search(
-                        r"(?i)\b(?:lung|thoracic|nsclc|sclc|mesothelioma)\b|"
-                        r"(?:肺癌|肺肿瘤|胸部肿瘤|胸膜间皮瘤|间皮瘤)",
-                        source_text,
-                    )
-                )
+                has_direct_topic = topic_has_direct_anchor(topic_profile, source_text)
                 if not has_research_statement or (
                     any(role.get("topicRelevance") == "direct" for role in research_roles)
                     and not has_direct_topic
@@ -2048,11 +2154,36 @@ def validate_contacts(
         return
     if not contacts:
         report.error(f"Candidate {identity}: add a published contact or explicit not_public entry")
+    strict_not_public = [
+        item for item in contacts
+        if isinstance(item, dict) and item.get("type") == "not_public"
+    ]
+    strict_valued = [
+        item for item in contacts
+        if isinstance(item, dict)
+        and item.get("type") != "not_public"
+        and str(item.get("value") or "").strip()
+    ]
+    if strict_not_public and strict_valued:
+        report.error(
+            f"Candidate {identity}: not_public cannot coexist with a form, mailbox, phone, "
+            "or any other valued contact in records[].contacts"
+        )
+    if len(strict_not_public) > 1:
+        report.error(f"Candidate {identity}: only one not_public contact marker is allowed")
     verified_at = parse_iso_date(record.get("verifiedAt"))
     for index, contact in enumerate(contacts):
         if not isinstance(contact, dict):
             report.error(f"Candidate {identity}: contact[{index}] must be an object")
             continue
+        if strict:
+            unsupported_keys = sorted(set(contact) - STRICT_CONTACT_KEYS)
+            if unsupported_keys:
+                report.error(
+                    f"Candidate {identity}: contact[{index}] contains unsupported strict-schema "
+                    f"keys {unsupported_keys}; put owner/currentness/channelId/preferredRoute "
+                    "metadata in data/contact-audit.json"
+                )
         contact_type = contact.get("type")
         if contact_type not in CONTACT_TYPES:
             report.error(f"Candidate {identity}: invalid contact type {contact_type}")
@@ -2815,6 +2946,122 @@ def validate_conflicts(
             report.error(f"{path} lacks an official conflict-domain source for officialValue")
 
 
+def validate_application_materials(
+    record: dict,
+    identity: str,
+    source_map: dict[str, dict],
+    as_of: dt.date | None,
+    strict: bool,
+    report: Report,
+    *,
+    audit_required: bool = False,
+) -> None:
+    """Validate route-specific document facts without composing application text.
+
+    Legacy cases are unchanged when neither the opt-in flag nor the array is
+    present. Explicit arrays always receive field and evidence validation;
+    strict new cases additionally need the four core checks on each live route.
+    A contact page proves a contact protocol only when its retained claim does
+    so; it does not make outreach a required admissions document.
+    """
+    path = f"Candidate {identity}: applicationReadiness.documentRequirements"
+    required = strict and audit_required and record.get("priorityTier") in {"A", "B", "C"}
+    ready = record.get("applicationReadiness")
+    present = isinstance(ready, dict) and "documentRequirements" in ready
+    if not present:
+        if required:
+            report.error(f"{path} is required for a new-case materials audit")
+        return
+    rows = ready["documentRequirements"]
+    if not isinstance(rows, list):
+        report.error(f"{path} must be an array")
+        return
+    validate_no_correspondence(rows, path, report)
+    opportunities = record.get("opportunities", [])
+    routes = {
+        str(route.get("id", "")): route
+        for route in opportunities
+        if isinstance(route, dict) and str(route.get("id", "")).strip()
+    } if isinstance(opportunities, list) else {}
+    covered: defaultdict[str, set[str]] = defaultdict(set)
+    material_keys: set[tuple[str, str, str]] = set()
+    subjects = {identity, *candidate_school_ids(record)}
+    for index, row in enumerate(rows):
+        row_path = f"{path}[{index}]"
+        if not isinstance(row, dict):
+            report.error(f"{row_path} must be an object")
+            continue
+        route_id = row.get("routeId")
+        if not isinstance(route_id, str) or route_id not in routes:
+            report.error(f"{row_path}.routeId must name an existing opportunities[] id")
+        material_type = row.get("materialType")
+        if not isinstance(material_type, str) or material_type not in APPLICATION_MATERIAL_TYPES:
+            report.error(f"{row_path}.materialType is invalid")
+        elif isinstance(route_id, str) and route_id in routes:
+            covered[route_id].add(material_type)
+        status = row.get("requirementStatus")
+        if not isinstance(status, str) or status not in APPLICATION_MATERIAL_STATUSES:
+            report.error(f"{row_path}.requirementStatus is invalid")
+        if not isinstance(row.get("submissionStage"), str) or row["submissionStage"] not in APPLICATION_MATERIAL_STAGES:
+            report.error(f"{row_path}.submissionStage is invalid")
+        if all(isinstance(value, str) for value in (route_id, material_type, row.get("submissionStage"))):
+            material_key = (route_id, material_type, row["submissionStage"])
+            if material_key in material_keys:
+                report.error(f"{row_path}: duplicate route/material/stage requirement {material_key}")
+            material_keys.add(material_key)
+        for field in ["summary", "formatAndLength", "submissionMethod"]:
+            if not isinstance(row.get(field), str) or not row[field].strip():
+                report.error(f"{row_path}.{field} must be a non-empty string (use an explicit missing marker if unknown)")
+        if "quantity" not in row:
+            report.error(f"{row_path}.quantity must be an integer >=1 or null")
+        elif row["quantity"] is not None and (
+            isinstance(row["quantity"], bool)
+            or not isinstance(row["quantity"], int)
+            or row["quantity"] < 1
+        ):
+            report.error(f"{row_path}.quantity must be an integer >=1 or null")
+        if not isinstance(row.get("submitter"), str) or row["submitter"] not in {"applicant", "referee", "not_stated"}:
+            report.error(f"{row_path}.submitter is invalid")
+        checked_at_text = row.get("checkedAt")
+        checked_at = parse_iso_date(checked_at_text) if (
+            isinstance(checked_at_text, str) and re.fullmatch(r"\d{4}-\d{2}-\d{2}", checked_at_text)
+        ) else None
+        if checked_at is None:
+            report.error(f"{row_path}.checkedAt must use YYYY-MM-DD")
+        elif as_of and checked_at > as_of:
+            report.error(f"{row_path}.checkedAt is later than case asOf")
+        source_ids = validate_string_list(
+            row.get("sourceIds"), f"{row_path}.sourceIds", report,
+            required=not isinstance(status, str) or status not in {"not_public", "unverified"},
+        )
+        allowed_domains = {"doctoral_rule", "admissions_funding", "recruitment"}
+        if material_type == "supervisor_enquiry":
+            allowed_domains.add("contact")
+        for source_id in source_ids:
+            source = source_map.get(source_id)
+            if source is None:
+                report.error(f"{row_path}.sourceIds contains unknown source {source_id}")
+                continue
+            if source.get("authorityClass") != "official_institution" or source.get("status") != "current":
+                report.error(f"{row_path}: source {source_id} must be a current official-institution source")
+            if not subjects.intersection(source.get("subjectIds", [])):
+                report.error(f"{row_path}: source {source_id} is not bound to the candidate or school")
+            if not allowed_domains.intersection(source.get("claimDomains", [])):
+                report.error(f"{row_path}: source {source_id} lacks a relevant document/contact claim domain")
+            accessed_at = parse_iso_date(source.get("accessedDate"))
+            if accessed_at is None:
+                report.error(f"{row_path}: source {source_id} accessedDate must use YYYY-MM-DD")
+            elif checked_at and accessed_at > checked_at:
+                report.error(f"{row_path}: source {source_id} was accessed after checkedAt")
+    if required:
+        for route_id, route in routes.items():
+            if route.get("status") in {"closed_expired", "historical_only"}:
+                continue
+            missing = CORE_APPLICATION_MATERIAL_TYPES - covered[route_id]
+            if missing:
+                report.error(f"{path}: active route {route_id} lacks material checks {sorted(missing)}")
+
+
 def validate_application_readiness(
     record: dict, identity: str, source_map: dict[str, dict], report: Report
 ) -> None:
@@ -3267,6 +3514,8 @@ def validate_records(
     as_of: dt.date | None,
     strict: bool,
     report: Report,
+    topic_profile: str = DEFAULT_TOPIC_PROFILE,
+    application_materials_audit_required: bool = False,
 ) -> dict[str, dict]:
     record_map = check_unique_ids("candidate", records, report)
     name_pairs: set[tuple[str, str]] = set()
@@ -3481,10 +3730,14 @@ def validate_records(
         ):
             report.error(
                 f"Candidate {identity}: T3 requires an explicit candidate-bound current official "
-                "direct lung-cancer application/project"
+                f"direct {'CV-aligned oncology' if topic_profile == 'cv_aligned_oncology' else 'lung-cancer'} application/project"
             )
 
         validate_opportunities(record, identity, source_map, as_of, strict, report)
+        validate_application_materials(
+            record, identity, source_map, as_of, strict, report,
+            audit_required=application_materials_audit_required,
+        )
         validate_string_list(
             record.get("secondaryCategories", []),
             f"Candidate {identity}: secondaryCategories",
@@ -3609,6 +3862,301 @@ def validate_records(
     return record_map
 
 
+def validate_contact_audit(
+    contact_audit: object,
+    record_map: dict[str, dict],
+    source_map: dict[str, dict],
+    as_of: dt.date | None,
+    report: Report,
+) -> dict | None:
+    """Validate the optional, dated contact-channel supplement."""
+    if contact_audit is None:
+        return None
+    if not isinstance(contact_audit, dict):
+        report.error("contact-audit.json must contain an object")
+        return None
+    if contact_audit.get("schemaVersion") != "1.0":
+        report.error("contact-audit.json schemaVersion must be 1.0")
+    audit_date = parse_iso_date(contact_audit.get("checkedAt"))
+    if audit_date is None:
+        report.error("contact-audit.json checkedAt must be an ISO date")
+    elif as_of and audit_date > as_of:
+        report.error("contact-audit.json checkedAt cannot postdate case.asOf")
+
+    audit_records = contact_audit.get("records")
+    if not isinstance(audit_records, list):
+        report.error("contact-audit.json records must be an array")
+        return contact_audit
+
+    seen_candidates: set[str] = set()
+    for record_index, audit_record in enumerate(audit_records):
+        path = f"contact-audit.json records[{record_index}]"
+        if not isinstance(audit_record, dict):
+            report.error(f"{path} must be an object")
+            continue
+        candidate_id = str(audit_record.get("candidateId") or "").strip()
+        if not candidate_id:
+            report.error(f"{path} is missing candidateId")
+        elif candidate_id not in record_map:
+            report.error(f"{path} candidateId does not resolve in records.json: {candidate_id}")
+        elif candidate_id in seen_candidates:
+            report.error(f"Duplicate contact-audit candidateId: {candidate_id}")
+        else:
+            seen_candidates.add(candidate_id)
+
+        checked_at = parse_iso_date(audit_record.get("checkedAt"))
+        if checked_at is None:
+            report.error(f"{path}.checkedAt must be an ISO date")
+        elif as_of and checked_at > as_of:
+            report.error(f"{path}.checkedAt cannot postdate case.asOf")
+        institution_zh = str(audit_record.get("currentInstitutionZh") or "").strip()
+        if not institution_zh or not re.search(r"[\u3400-\u9fff]", institution_zh):
+            report.error(f"{path}.currentInstitutionZh must contain a substantive Chinese value")
+
+        policy = audit_record.get("contactPolicy")
+        if policy not in CONTACT_AUDIT_POLICIES:
+            report.error(f"{path}.contactPolicy has invalid value: {policy}")
+
+        search_audit = audit_record.get("searchAudit")
+        steps: list[dict] = []
+        exhausted_before_publication = None
+        if not isinstance(search_audit, dict):
+            report.error(f"{path}.searchAudit must be an object")
+        else:
+            exhausted_before_publication = search_audit.get(
+                "officialFallbacksExhaustedBeforePublication"
+            )
+            if not isinstance(exhausted_before_publication, bool):
+                report.error(
+                    f"{path}.searchAudit.officialFallbacksExhaustedBeforePublication "
+                    "must be boolean"
+                )
+            step_values = search_audit.get("steps")
+            if not isinstance(step_values, list) or not step_values:
+                report.error(f"{path}.searchAudit.steps must be a non-empty array")
+            else:
+                for step_index, step in enumerate(step_values):
+                    step_path = f"{path}.searchAudit.steps[{step_index}]"
+                    if not isinstance(step, dict):
+                        report.error(f"{step_path} must be an object")
+                        continue
+                    stage = step.get("stage")
+                    if stage not in CONTACT_AUDIT_STAGES:
+                        report.error(f"{step_path}.stage has invalid value: {stage}")
+                    if not str(step.get("routeType") or "").strip():
+                        report.error(f"{step_path}.routeType is required")
+                    result_zh = str(step.get("resultZh") or "").strip()
+                    if not result_zh or not re.search(r"[\u3400-\u9fff]", result_zh):
+                        report.error(f"{step_path}.resultZh must contain a Chinese result")
+                    if "sourceIds" not in step:
+                        report.error(f"{step_path}.sourceIds is required")
+                    step_source_ids = step.get("sourceIds")
+                    if not isinstance(step_source_ids, list):
+                        report.error(f"{step_path}.sourceIds must be an array")
+                    else:
+                        for source_id in step_source_ids:
+                            if not isinstance(source_id, str) or not source_id.strip():
+                                report.error(f"{step_path}.sourceIds contains an invalid ID")
+                            elif source_id not in source_map:
+                                report.error(f"{step_path} references unknown source ID: {source_id}")
+                    steps.append(step)
+
+        stages = [str(step.get("stage") or "") for step in steps]
+        publication_indices = [i for i, stage in enumerate(stages) if stage == "publication"]
+        if publication_indices:
+            first_publication = publication_indices[0]
+            if exhausted_before_publication is not True:
+                report.error(
+                    f"{path} has a publication search but does not affirm that official "
+                    "fallbacks were exhausted first"
+                )
+            if "current_official_primary" not in stages[:first_publication]:
+                report.error(f"{path} publication search lacks a preceding official-primary step")
+            if "current_official_fallback" not in stages[:first_publication]:
+                report.error(f"{path} publication search lacks a preceding official-fallback step")
+            if any(
+                stage in {"current_official_primary", "current_official_fallback"}
+                for stage in stages[first_publication + 1 :]
+            ):
+                report.error(f"{path} records an official search after publication searching began")
+
+        channels = audit_record.get("channels")
+        if not isinstance(channels, list) or not channels:
+            report.error(f"{path}.channels must be a non-empty array")
+            continue
+        seen_channel_ids: set[str] = set()
+        channels_by_id: dict[str, dict] = {}
+        not_public_channels: list[dict] = []
+        valued_channels: list[dict] = []
+        publication_channels: list[dict] = []
+        for channel_index, channel in enumerate(channels):
+            channel_path = f"{path}.channels[{channel_index}]"
+            if not isinstance(channel, dict):
+                report.error(f"{channel_path} must be an object")
+                continue
+            channel_id = str(channel.get("channelId") or "").strip()
+            if not channel_id:
+                report.error(f"{channel_path}.channelId is required")
+            elif not re.fullmatch(r"[a-z0-9]+(?:-[a-z0-9]+)*", channel_id):
+                report.error(f"{channel_path}.channelId must be a lowercase ASCII slug: {channel_id}")
+            elif channel_id in seen_channel_ids:
+                report.error(f"{path} has duplicate channelId: {channel_id}")
+            else:
+                seen_channel_ids.add(channel_id)
+                channels_by_id[channel_id] = channel
+
+            channel_type = channel.get("type")
+            owner = channel.get("owner")
+            currentness = channel.get("currentness")
+            if channel_type not in CONTACT_AUDIT_TYPES:
+                report.error(f"{channel_path}.type has invalid value: {channel_type}")
+            if "owner" not in channel or owner not in CONTACT_AUDIT_OWNERS:
+                report.error(f"{channel_path}.owner has invalid or missing value: {owner}")
+            if "currentness" not in channel or currentness not in CONTACT_AUDIT_CURRENTNESS:
+                report.error(
+                    f"{channel_path}.currentness has invalid or missing value: {currentness}"
+                )
+            if "sourceIds" not in channel:
+                report.error(f"{channel_path}.sourceIds is required")
+            channel_source_ids = channel.get("sourceIds")
+            if not isinstance(channel_source_ids, list):
+                report.error(f"{channel_path}.sourceIds must be an array")
+                channel_source_ids = []
+            else:
+                for source_id in channel_source_ids:
+                    if not isinstance(source_id, str) or not source_id.strip():
+                        report.error(f"{channel_path}.sourceIds contains an invalid ID")
+                    elif source_id not in source_map:
+                        report.error(f"{channel_path} references unknown source ID: {source_id}")
+
+            value = str(channel.get("value") or "").strip()
+            if channel_type == "not_public":
+                not_public_channels.append(channel)
+                if value:
+                    report.error(f"{channel_path}: not_public must have an empty value")
+                if owner != "unclear":
+                    report.error(f"{channel_path}: not_public owner must be unclear")
+                if currentness != "not_public":
+                    report.error(f"{channel_path}: not_public currentness must be not_public")
+            else:
+                valued_channels.append(channel)
+                if not value:
+                    report.error(f"{channel_path}: valued channel requires a value")
+                if not channel_source_ids:
+                    report.error(f"{channel_path}: valued channel requires at least one source ID")
+            if channel_type == "publication_correspondence_email":
+                publication_channels.append(channel)
+                if currentness != "publication_time_only":
+                    report.error(
+                        f"{channel_path}: publication correspondence email must use "
+                        "publication_time_only currentness"
+                    )
+                if not any(
+                    source_map.get(str(source_id), {}).get("authorityClass") == "primary_publication"
+                    and "contact" in source_map.get(str(source_id), {}).get("claimDomains", [])
+                    and candidate_id in source_map.get(str(source_id), {}).get("subjectIds", [])
+                    for source_id in channel_source_ids
+                ):
+                    report.error(
+                        f"{channel_path}: publication correspondence email needs a candidate-bound, "
+                        "contact-domain primary-publication source"
+                    )
+            if currentness == "current_official" and channel_type != "not_public":
+                allowed_subjects = {candidate_id}
+                if candidate_id in record_map:
+                    allowed_subjects.update(candidate_school_ids(record_map[candidate_id]))
+                if not any(
+                    source_map.get(str(source_id), {}).get("authorityClass") == "official_institution"
+                    and source_map.get(str(source_id), {}).get("status") == "current"
+                    and "contact" in source_map.get(str(source_id), {}).get("claimDomains", [])
+                    and allowed_subjects.intersection(
+                        source_map.get(str(source_id), {}).get("subjectIds", [])
+                    )
+                    for source_id in channel_source_ids
+                ):
+                    report.error(
+                        f"{channel_path}: current_official channel needs one same current, "
+                        "contact-domain official-institution source bound to the candidate or school"
+                    )
+
+        if not_public_channels and valued_channels:
+            report.error(f"{path}: not_public cannot coexist with any valued contact channel")
+        if len(not_public_channels) > 1:
+            report.error(f"{path}: only one not_public marker is allowed")
+        if not_public_channels and candidate_id in record_map:
+            strict_contacts = record_map[candidate_id].get("contacts", [])
+            if isinstance(strict_contacts, list) and any(
+                isinstance(item, dict)
+                and item.get("type") != "not_public"
+                and str(item.get("value") or "").strip()
+                for item in strict_contacts
+            ):
+                report.error(
+                    f"{path}: not_public conflicts with an existing form/mailbox/phone or other "
+                    "valued channel in records.json"
+                )
+        if valued_channels and candidate_id in record_map:
+            strict_contacts = record_map[candidate_id].get("contacts", [])
+            if isinstance(strict_contacts, list) and any(
+                isinstance(item, dict) and item.get("type") == "not_public"
+                for item in strict_contacts
+            ):
+                report.error(
+                    f"{path}: valued supplemental channels conflict with the not_public marker "
+                    "in records.json; update the strict current-contact record"
+                )
+        if publication_channels:
+            if "publication" not in stages:
+                report.error(f"{path}: publication-only channel lacks a publication search step")
+            if exhausted_before_publication is not True:
+                report.error(
+                    f"{path}: publication-only channel requires official fallback searches first"
+                )
+
+        preferred = audit_record.get("preferredRoute")
+        if not_public_channels and not valued_channels:
+            if preferred is not None:
+                report.error(f"{path}.preferredRoute must be null when only not_public is present")
+        else:
+            if not isinstance(preferred, dict):
+                report.error(f"{path}.preferredRoute must be an object for usable channels")
+            else:
+                preferred_channel_id = str(preferred.get("preferredChannelId") or "").strip()
+                if not preferred_channel_id or preferred_channel_id not in channels_by_id:
+                    report.error(
+                        f"{path}.preferredRoute.preferredChannelId does not resolve: "
+                        f"{preferred_channel_id or '<missing>'}"
+                    )
+                elif channels_by_id[preferred_channel_id].get("type") == "not_public":
+                    report.error(f"{path}.preferredRoute cannot select not_public")
+                if not str(preferred.get("reasonZh") or "").strip():
+                    report.error(f"{path}.preferredRoute.reasonZh is required")
+                same_day = preferred.get("sameDayRecheckRequired")
+                if not isinstance(same_day, bool):
+                    report.error(
+                        f"{path}.preferredRoute.sameDayRecheckRequired must be boolean"
+                    )
+                if preferred_channel_id in channels_by_id:
+                    selected = channels_by_id[preferred_channel_id]
+                    if (
+                        selected.get("currentness") != "current_official"
+                        and any(
+                            channel.get("currentness") == "current_official"
+                            and channel.get("type") != "not_public"
+                            for channel in valued_channels
+                        )
+                    ):
+                        report.error(
+                            f"{path}.preferredRoute must select a current_official channel when one exists"
+                        )
+                    if selected.get("currentness") != "current_official" and same_day is not True:
+                        report.error(
+                            f"{path}.preferredRoute must require same-day recheck for a "
+                            "non-current-official channel"
+                        )
+    return contact_audit
+
+
 def validate_outputs(
     case_dir: Path,
     case: dict,
@@ -3616,6 +4164,7 @@ def validate_outputs(
     coverage: list[dict],
     records: list[dict],
     sources: list[dict],
+    contact_audit: dict | None,
     strict: bool,
     report: Report,
 ) -> None:
@@ -3623,7 +4172,7 @@ def validate_outputs(
         return
     stats_line = evidence_stats_line(sources)
     texts: dict[str, str] = {}
-    for filename in OUTPUT_FILES:
+    for filename in expected_output_files(case_dir):
         path = case_dir / filename
         if not path.exists():
             report.error(f"Missing rendered output: {filename}")
@@ -3709,6 +4258,23 @@ def validate_outputs(
         count = len(re.findall(rf"^\|\s*{re.escape(source_id)}\s*\|", ledger, flags=re.MULTILINE))
         if count != 1:
             report.error(f"07-SOURCE-LEDGER.md lists source {source_id} {count} times; expected once")
+    if contact_audit is not None:
+        index_text = texts.get("00-INDEX.md", "")
+        if "08-CONTACT-AUDIT.md" not in index_text:
+            report.error("00-INDEX.md does not link the optional contact audit")
+        contact_text = texts.get(OPTIONAL_CONTACT_OUTPUT, "")
+        audit_records = contact_audit.get("records", [])
+        if isinstance(audit_records, list):
+            for audit_record in audit_records:
+                if not isinstance(audit_record, dict):
+                    continue
+                candidate_id = str(audit_record.get("candidateId") or "")
+                marker = f"- 候选人 ID：`{candidate_id}`"
+                if candidate_id and contact_text.count(marker) != 1:
+                    report.error(
+                        f"{OPTIONAL_CONTACT_OUTPUT} does not contain contact-audit candidate "
+                        f"{candidate_id} exactly once"
+                    )
 
 
 def validate_source_usage(
@@ -3716,13 +4282,14 @@ def validate_source_usage(
     schools: list[dict],
     coverage: list[dict],
     records: list[dict],
+    contact_audit: dict | None,
     source_map: dict[str, dict],
     strict: bool,
     report: Report,
 ) -> None:
     referenced_ids = {
         source_id
-        for value in [case, schools, coverage, records]
+        for value in [case, schools, coverage, records, contact_audit]
         for source_id, _ in collect_source_refs(value)
         if source_id
     }
@@ -3740,6 +4307,7 @@ def validate_discovery_lead_usage(
     schools: list[dict],
     coverage: list[dict],
     records: list[dict],
+    contact_audit: dict | None,
     source_map: dict[str, dict],
     report: Report,
 ) -> None:
@@ -3749,6 +4317,7 @@ def validate_discovery_lead_usage(
         ("schools", schools),
         ("coverage", coverage),
         ("records", records),
+        ("contact-audit", contact_audit),
     ]
     for container_name, value in containers:
         for source_id, field_path in collect_source_refs(value):
@@ -3796,12 +4365,23 @@ def main() -> int:
     coverage = require_list("coverage.json", values.get("coverage.json"), report)
     records = require_list("records.json", values.get("records.json"), report)
     sources = require_list("sources.json", values.get("sources.json"), report)
+    contact_audit_value = values.get("contact-audit.json")
 
     as_of = validate_case_metadata(case, args.strict, report)
-    source_map = validate_sources(sources, as_of, args.strict, report)
+    try:
+        topic_profile = resolve_topic_profile(case)
+    except ValueError:
+        # Metadata validation already recorded the error. Continue diagnostics
+        # with legacy semantics without allowing an invalid profile to pass.
+        topic_profile = DEFAULT_TOPIC_PROFILE
+    source_map = validate_sources(sources, as_of, args.strict, report, topic_profile)
     school_map = validate_schools(schools, case, source_map, args.strict, report)
     record_map = validate_records(
-        records, school_map, source_map, as_of, args.strict, report
+        records, school_map, source_map, as_of, args.strict, report, topic_profile,
+        application_materials_audit_required=case.get("applicationMaterialsAuditRequired") is True,
+    )
+    contact_audit = validate_contact_audit(
+        contact_audit_value, record_map, source_map, as_of, report
     )
     validate_source_entities_and_scope(
         case, school_map, record_map, source_map, args.strict, report
@@ -3811,14 +4391,18 @@ def main() -> int:
     validate_references("school", schools, source_map, report)
     validate_references("coverage", coverage, source_map, report)
     validate_references("candidate", records, source_map, report)
+    if contact_audit is not None:
+        validate_references("contact audit", [contact_audit], source_map, report)
     validate_coverage(coverage, school_map, record_map, source_map, args.strict, report)
     validate_completion_semantics(case, coverage, args.strict, report)
     validate_source_usage(
-        case, schools, coverage, records, source_map, args.strict, report
+        case, schools, coverage, records, contact_audit, source_map, args.strict, report
     )
-    validate_discovery_lead_usage(case, schools, coverage, records, source_map, report)
+    validate_discovery_lead_usage(
+        case, schools, coverage, records, contact_audit, source_map, report
+    )
     validate_outputs(
-        case_dir, case, schools, coverage, records, sources, args.strict, report
+        case_dir, case, schools, coverage, records, sources, contact_audit, args.strict, report
     )
 
     stats = evidence_stats(sources)

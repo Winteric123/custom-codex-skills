@@ -23,15 +23,19 @@ outputs/<location>-lung-cancer-phd-supervisors-<YYYY-MM-DD>/
 ├── 05-A-TIER-DEEP-PROFILES.md
 ├── 06-APPLICATION-READINESS.md
 ├── 07-SOURCE-LEDGER.md
+├── 08-CONTACT-AUDIT.md (only when data/contact-audit.json exists)
 └── data/
     ├── case.json
     ├── schools.json
     ├── coverage.json
     ├── records.json
-    └── sources.json
+    ├── sources.json
+    └── contact-audit.json (optional)
 ```
 
 Keep the JSON files as the only hand-edited source of truth. Regenerate Markdown after any correction.
+
+The directory tree above illustrates the narrow profile. New `cv_aligned_oncology` cases use the initializer's distinct `cv-oncology-<topic-hash>` scope tag instead of `lung-cancer`; do not reuse a narrow case directory to switch profile.
 
 Schema `1.2` is intentionally stricter than earlier cases. Preserve pre-`1.2` data and reports as a historical snapshot, migrate them into a new dated case directory, add the required scope/affiliation/opportunity/audit/source metadata, and validate the migrated case. Never overwrite an older report in place merely to make it appear current.
 
@@ -39,7 +43,13 @@ Schema `1.2` is intentionally stricter than earlier cases. Preserve pre-`1.2` da
 
 Do not use one label for research relevance, supervision evidence, and recruitment.
 
+Apply the institutional eligibility gate in `search-playbook.md` before these axes. Engineering/computing/standalone-data-only exclusions, and unresolved gate leads, belong in sourced `coverage[].notes` outside the supervisor roster, not in a lower tier. They do not count in `records.json`, coverage candidate IDs, discovery-pass additions, or A/B/C/D totals. An explicit user exception must be recorded in the case notes/limitations and the retained person's `notes`; the schema remains `1.2`. Updating this default does not itself rescreen historical cases or a user-approved list.
+
+Apply the independent research-direction gate from `candidate-exclusions.md` before these axes as well. Paediatric oncology and haematologic malignancies are excluded only when current person-specific evidence shows that they are the main or predominant focus of the person's overall current research programme; a co-equal parallel, secondary or collaborative line does not itself exclude an otherwise eligible candidate. Retain unresolved dominance with a dated caution. Nuclear medicine and radiomics/core clinical or molecular tumour imaging remain excluded when current core or explicit parallel lines. Store defaults/overrides in `case.limitations` and named, dated, sourced exclusions in `coverage[].notes`, outside every candidate count and discovery addition. Preserve real research exclusion evidence in school-bound source records with no ghost candidate IDs/person roles. Record retained parallel/secondary or dominance-unresolved paediatric/haematologic lines and the balance decision in `records[].notes`. Do not add unvalidated schema fields; these defaults are initialized as limitations in new cases and do not rewrite resumed historical cases.
+
 ### Topic directness
+
+Interpret T codes using `case.topicProfile`. Missing means `lung_cancer` for backward compatibility. Explicit `cv_aligned_oncology` uses the broader approved axes in `cv-aligned-scope.md`; never change an old case's profile or its source relevance in place merely to pass validation.
 
 | Code | Meaning |
 |---|---|
@@ -48,7 +58,9 @@ Do not use one label for research relevance, supervision evidence, and recruitme
 | `T3` | Pan-cancer or methods platform with an explicit current lung-cancer project or application. |
 | `T4` | Lung cancer is collaborative, historical, exploratory, or not clearly independent. |
 
-In strict delivery, `T1` and `T2` require two candidate-bound current official facts: a direct lung-cancer research line and an independent group-leader or PI role. One page may prove both, but a paired official research page and official role page is also valid; each source record must retain only the fact it actually states. A publication alone does not prove a current independent line. `T3` requires a current candidate-bound explicit lung-cancer project or application. Historical, collaborative, future, or role-unclear evidence remains `T4` unless stronger current evidence exists.
+The table above retains the narrow lung-profile meanings. Under `cv_aligned_oncology`: T1 is a current independent/sustained direct line in an approved oncology axis; T2 is a current multi-cancer or multi-axis oncology programme that explicitly includes an approved axis; T3 is a broader platform with an explicit current application in an approved cancer axis; T4 is collaborative, historical, exploratory or unclear independence in that declared scope. L1–L3 discovery bands express lung-first/broad-oncology preference and are not replacements for T codes or A–D tiers; retain the matched band/axis, actual disease and training gap in `records[].notes`.
+
+In strict delivery, `T1` and `T2` require two candidate-bound current official facts: a direct line within the declared profile and an independent group-leader or PI role. One page may prove both, but a paired official research page and official role page is also valid; each source record must retain only the fact it actually states. A publication alone does not prove a current independent line. `T3` requires a current candidate-bound explicit in-profile project or application. Historical, collaborative, future, or role-unclear evidence remains `T4` unless stronger current evidence exists. Broad-profile direct claims require a source-specific cancer/oncology anchor; keyword validation is not a substitute for manually verifying the approved scientific axis or institutional gate.
 
 ### Supervision evidence
 
@@ -66,9 +78,11 @@ In strict delivery, `T1` and `T2` require two candidate-bound current official f
 | `A` | Strong current topic match with credible supervision/doctoral route; suitable for deep profiling. |
 | `B` | Strong topic or method fit but supervision, current independence, or doctoral path is incomplete. |
 | `C` | Useful collaborator, shared platform, adjacent field, or conditional co-supervisor. |
-| `D` | Historical, moved, out of scope, materially conflicted, or too weak to approach now. |
+| `D` | Historical, moved, weak topic fit, materially conflicted, or too weak to approach now; never a container for institutional/research-direction exclusions. |
 
-Tier does not encode vacancy status. A-tier does not mean currently recruiting.
+Tier does not encode vacancy status. A-tier does not mean currently recruiting. Conversely, failure to verify a vacancy, `route_confirmed_no_vacancy`, `closed_expired`, `no_public_evidence`, or `unverified` recruitment must not exclude/delete an otherwise eligible record or lower its topic, supervision, or A–D classification. Preserve the candidate and record opportunity status separately. An explicit negative PI/lab reply belongs in a dated, intake/scope-limited correspondence/outreach-control overlay with a recheck condition unless an independent research-roster exclusion also applies. If surfaced in the research package, store only minimal metadata in `records[].notes` and A-tier `applicationReadiness.cautions[]`, linked to an external correspondence ledger; private email/screenshots are not public `sources.json` evidence.
+
+Disease preference does not replace readiness grading. Under `cv_aligned_oncology`, apply the disease-breadth modifier from `cv-aligned-scope.md` within otherwise comparable evidence/readiness groups: a verified programme limited to one or a few thoracic malignancies ranks ahead of a similarly supported narrow non-thoracic programme, with lung cancer/NSCLC/SCLC first and oesophageal, pleural or thymic/mediastinal malignancies retained as thoracic. Broad multi-tumour, pan-cancer and general cancer-mechanism programmes remain separately comparable on axis fit, supervision and route and are not automatically demoted. Store the bounded classification and supporting disease/source IDs in `records[].notes`; do not raise a weak thoracic lead to A or alter T evidence quality merely because of the tumour site.
 
 A/B/C records need a current source-bound affiliation. A D-tier discovery lead may keep an empty `affiliations` array only when `currentRoleSourceIds` is also empty and `academicRole` explicitly begins with `unverified`/`未确认`; this preserves candidate-discovery provenance without presenting the person as a verified current supervisor.
 
@@ -93,6 +107,8 @@ Use the closest primary category and optional secondary categories:
 
 Add a clearly defined category when the evidence does not fit; do not force a misleading label.
 
+The C1–C8 themes can also describe the broader oncology profile; do not force a thoracic label onto another cancer. For cancer genetic/clinical epidemiology and causal inference, a defined additional category such as C9 is acceptable, with its meaning retained in the case notes.
+
 ## 3. Structured JSON schema
 
 Use UTF-8 JSON with two-space indentation. IDs must be stable lowercase ASCII slugs derived from identity, never from input order; use a deterministic hash suffix only for true slug collisions.
@@ -104,6 +120,8 @@ Use UTF-8 JSON with two-space indentation. IDs must be stable lowercase ASCII sl
   "schemaVersion": "1.2",
   "location": "Switzerland",
   "topic": "thoracic oncology, especially lung cancer",
+  "topicProfile": "lung_cancer",
+  "applicationMaterialsAuditRequired": true,
   "asOf": "2026-09-07",
   "intake": "",
   "scopeMode": "qs_top_300",
@@ -158,6 +176,10 @@ Use UTF-8 JSON with two-space indentation. IDs must be stable lowercase ASCII sl
 ```
 
 Use `scopeMode` = `named_schools` or `qs_top_300`. Preserve the literal user input in `requestedSchools` for named-school cases and map every literal one-to-one to a verified `schoolId` in `requestedSchoolResolutions`; this allows a Chinese name or abbreviation to resolve to a different official name without losing provenance. Strict delivery requires `decision: resolved` and official identity-resolution sources. Use empty arrays for both fields in location-only screening. For a location-only run, `locationResolution` preserves the literal request, resolves it to the exact jurisdictions used by the ranking filter, records `country_exact`, `subnational_within_country`, or `multi_jurisdiction_region`, and cites an official jurisdiction source. `schools.json` contains only included schools; a location-only run also records the official country/region filter in `rankingQuery`, the covered `jurisdictions`, the independently counted number of eligible institutions, and checked exclusions in `scopeAudit.excludedInstitutions`. `includedSchoolIds` must exactly match the included school IDs and `eligibleInstitutionCount`. A positive ranked school must have a parseable rank or rank band within the threshold; a ranked excluded institution must be outside the threshold. Each record retains the same edition/date and an official ranking source. Before final rendering, set `status` to `complete`, meaning the package is generated rather than that all branches are exhausted, and record at least two search-expansion passes plus a separate final saturation pass, for at least three entries total; each pass records `passType`, `performedAt`, non-empty `queriesOrUnits`, `sourceIds`, `newCandidateIds`, and matching `newCandidateCount`. The first pass is `official_expansion`, at least one intermediate pass is `literature_expansion`, and the final `saturation` pass adds zero qualified candidates. A literature pass must cite at least one publication, grant, or trial record rather than only profile pages. Across passes, each final candidate ID must appear exactly once; ghost IDs and repeated IDs are invalid. If any coverage row is `blocked_unverified`, the final pass must document a retry/recheck and `limitations[]` must state that coverage remains bounded/non-exhaustive.
+
+`case.topicProfile` is an optional backward-compatible schema-1.2 field with exactly two values: `lung_cancer` and `cv_aligned_oncology`. Absence alone defaults to legacy lung; an explicit empty/unknown value is invalid. `case.topic` is a display description, not an implicit mode selector. New broad cases must declare their profile and summarize accepted applicant-aligned axes/preferences in `case.limitations[]` or discovery queries; mark band/axis and any neutral evidence gap in the candidate's existing `notes`. Do not insert an applicant CV as official supervisor evidence or add unvalidated candidate-fit fields. Broad output directories are distinct from narrow cases; preserve and never silently reclassify existing cases.
+
+`case.applicationMaterialsAuditRequired` is an optional boolean in schema 1.2. New initializations set it to `true`; absence/false preserves legacy validation without rewriting historical files. In a strict complete case with this flag, every A/B/C candidate's viable opportunity routes need `applicationReadiness.documentRequirements` covering motivation letter, supervisor enquiry/pre-contact, recommendation letters and research proposal. Additional official documents are recorded as applicable. Arrays present in legacy cases are still validated; an absent flag is not permission to present unsupported material claims.
 
 ### `schools.json`
 
@@ -227,6 +249,14 @@ Allowed status: `pending`, `searched`, `candidates_found`, `not_present`, `block
 ### `records.json`
 
 Each candidate record:
+
+Chinese display contract for every new or touched candidate record:
+
+- The user-facing faculty/department/unit, current appointment/title, and research direction must be Chinese-first. This applies to chat answers and every rendered artifact, not only `02-SUPERVISOR-TABLE.md`.
+- Populate `faculty`, `department`, `group`, `academicRole`, `adminClinicalRole`, `focus`, and `directionOverviewZh` with a substantive Chinese rendering when the field is applicable. A bilingual value may retain the exact official label after the Chinese text, for example `研究组负责人（Head of Research Group）`; an English/German/local-language-only value is not delivery-ready.
+- Apply the same rule to the displayed content of `affiliations[].institution`, `.faculty`, `.department`, `.relationship`, and `.role`. Preserve exact source-language role wording in `sources[].personRoles[].exactLabel` and official names/URLs in source records, so translation never replaces evidence.
+- Translate conservatively and never upgrade title, rank, independence, clinical seniority, or supervision authority. Where no safe exact equivalent exists, use a bounded Chinese functional description followed by the official label and an uncertainty note. Where the underlying fact is absent, use an explicit Chinese missing marker such as `未公开` or `未核实`; do not invent a translation or leave a user-facing cell blank.
+- Chinese column headings alone are insufficient: the value in each of these fields must itself contain meaningful Chinese text.
 
 ```json
 {
@@ -300,7 +330,7 @@ Each candidate record:
   "directEvidenceException": "",
   "phdTypes": [],
   "doctoralRoute": "",
-  "opportunityStatus": "no_public_evidence",
+  "opportunityStatus": "route_confirmed_no_vacancy",
   "opportunityDetail": "",
   "opportunityDeadline": "",
   "opportunities": [
@@ -360,6 +390,7 @@ Each candidate record:
   },
   "conflicts": [],
   "applicationReadiness": {
+    "documentRequirements": [],
     "contactProtocol": "",
     "applicationWindow": "",
     "eligibilityRequirements": "",
@@ -421,7 +452,88 @@ Each candidate record:
 }
 ```
 
-Contact types: `personal_email`, `clinical_email`, `group_email`, `unit_email`, `department_mailbox`, `secretariat_email`, `assistant_contact`, `phone`, `contact_form`, `not_public`. A `not_public` contact is a missing-value marker: set `value` to an empty string, `status` to `not_public`, and `sourceIds` to an empty array. Never attach an inferred address or a source that did not publish a value. For `personal_email` and `clinical_email` with `published_current`, at least one single cited record must simultaneously be current, `official_institution`, contact-domain, and candidate-bound; do not combine unrelated sources to satisfy those properties. The mailbox must visibly identify the candidate and must not be an obvious unit/office/secretariat alias; use `assistant_contact` for another named person's published address and `unit_email` or the more specific group/department/secretariat type for generic mailboxes. A researcher-controlled ORCID email is a discovery lead, not official current contact evidence: independently verify it on an institutional page or omit it from the deliverable and use the blank `not_public` marker.
+Contact types: `personal_email`, `clinical_email`, `group_email`, `unit_email`, `department_mailbox`, `secretariat_email`, `assistant_contact`, `phone`, `contact_form`, `not_public`. A `not_public` contact is an exclusive missing-value marker: set `value` to an empty string, `status` to `not_public`, and `sourceIds` to an empty array, and use it only when no public form, mailbox, assistant, phone, or other usable route was found. Never attach an inferred address or a source that did not publish a value. For `personal_email` and `clinical_email` with `published_current`, at least one single cited record must simultaneously be current, `official_institution`, contact-domain, and candidate-bound; do not combine unrelated sources to satisfy those properties. The mailbox must visibly identify the candidate and must not be an obvious unit/office/secretariat alias; use `assistant_contact` for another named person's published address and `unit_email` or the more specific group/department/secretariat type for generic mailboxes. A researcher-controlled ORCID email is a discovery lead, not official current contact evidence: independently verify it on an institutional page or omit that address from the deliverable. Preserve any verified fallback route; use the blank `not_public` marker only if no such route exists.
+
+In strict schema 1.2, each `records[].contacts[]` object is closed to exactly `type`, `value`, `status`, and `sourceIds`. The validator rejects extra keys such as `owner`, `currentness`, `channelId`, or `preferredRoute` in that strict object. Put those richer audit fields only in optional `data/contact-audit.json`; this prevents the strict current-contact record from silently accepting unsupported supplemental metadata.
+
+When a publication explicitly binds an email to the candidate as corresponding author but no current official institutional page confirms that mailbox, retain it only in the dated supplemental contact audit defined by `contact-verification-playbook.md` as `publication_correspondence_email`, with publication year, owner binding, currentness caution, and source URL. Do not insert that supplemental type into strict schema-1.2 `records[].contacts`, and do not replace an available current official non-personal route with it. If a current official institutional page independently publishes the same mailbox, store the official evidence as the strict personal/clinical contact and keep the publication source only as corroboration when useful.
+
+### Optional `contact-audit.json`
+
+Use this supplemental file whenever a run specifically finds, refreshes, compares, or displays contact channels. Its presence activates both strict validation and rendering of `08-CONTACT-AUDIT.md`. It must be an object, not a bare array:
+
+```json
+{
+  "schemaVersion": "1.0",
+  "checkedAt": "2026-10-25",
+  "records": [
+    {
+      "candidateId": "example-university-person-name",
+      "checkedAt": "2026-10-25",
+      "currentInstitutionZh": "示例大学医学中心",
+      "searchAudit": {
+        "officialFallbacksExhaustedBeforePublication": true,
+        "steps": [
+          {
+            "stage": "current_official_primary",
+            "routeType": "personal_profile",
+            "resultZh": "官网本人页面已检查。",
+            "sourceIds": ["src-person-profile"]
+          },
+          {
+            "stage": "current_official_fallback",
+            "routeType": "person_directed_form",
+            "resultZh": "找到本人定向表单。",
+            "sourceIds": ["src-person-form"]
+          },
+          {
+            "stage": "publication",
+            "routeType": "primary_publication",
+            "resultZh": "论文列出本人通讯邮箱。",
+            "sourceIds": ["src-person-paper"]
+          }
+        ]
+      },
+      "channels": [
+        {
+          "channelId": "official-person-form",
+          "type": "contact_form",
+          "value": "https://example.edu/person/contact",
+          "owner": "candidate",
+          "currentness": "current_official",
+          "sourceIds": ["src-person-form"],
+          "candidateBound": true,
+          "notesZh": "当前官方本人定向入口。"
+        },
+        {
+          "channelId": "paper-email-2025",
+          "type": "publication_correspondence_email",
+          "value": "person@example.edu",
+          "owner": "candidate",
+          "currentness": "publication_time_only",
+          "sourceIds": ["src-person-paper"],
+          "candidateBound": true,
+          "sourceDate": "2025",
+          "notesZh": "仅由论文通讯作者栏确认。"
+        }
+      ],
+      "preferredRoute": {
+        "preferredChannelId": "official-person-form",
+        "reasonZh": "当前官方且本人定向。",
+        "sameDayRecheckRequired": false
+      },
+      "contactPolicy": "not_stated",
+      "cautionZh": "公开联系方式不等于允许未经邀请的联系。"
+    }
+  ]
+}
+```
+
+`candidateId` must resolve to exactly one `records.json` record. `channelId` is a per-candidate unique lowercase ASCII slug. Allowed channel types are `personal_email`, `clinical_email`, `publication_correspondence_email`, `group_email`, `unit_email`, `department_mailbox`, `secretariat_email`, `assistant_contact`, `phone`, `contact_form`, and `not_public`. Allowed owners are `candidate`, `assistant`, `group`, `unit`, `department`, `secretariat`, `institution`, and `unclear`. Allowed currentness values are `current_official`, `publication_time_only`, `former_institution`, `currentness_unverified`, `historical`, and `not_public`. Every channel must contain `owner`, `currentness`, and `sourceIds`; every real-valued channel needs at least one valid source ID. A `current_official` channel needs one same current `official_institution`, contact-domain source bound to the candidate or applicable school. A `publication_correspondence_email` needs one same candidate-bound, contact-domain `primary_publication` source.
+
+`preferredRoute` must select one existing non-`not_public` channel through `preferredChannelId`, explain the Chinese reason, and state whether a same-day recheck is needed. If any usable `current_official` channel exists, the preferred route must select a current-official channel; a same-day recheck flag cannot justify preferring a paper, historical, former-institution, or unverified route over it. A publication-time or otherwise not-current channel must set `sameDayRecheckRequired: true` only when no current-official channel is available. If and only if the sole channel is `not_public`, set `preferredRoute` to `null`. A `not_public` channel cannot coexist with any valued channel in either `contact-audit.json` or `records.json`; it must have empty `value`, owner `unclear`, currentness `not_public`, and an explicit `sourceIds` array (which may be empty for a documented negative search).
+
+The ordered `searchAudit.steps[]` records official-primary, official-fallback, publication, researcher-controlled, or other checks. When a publication step or `publication_correspondence_email` exists, `officialFallbacksExhaustedBeforePublication` must be `true`, at least one official-primary and one official-fallback step must precede it, and no official step may occur after the first publication step. This protects person-directed forms, group/unit/department/secretariat channels, assistants, and phones from being overwritten by a paper email or `not_public` marker.
 
 `schoolId` is the primary grouping university, not the whole affiliation claim. `additionalSchoolIds` lists other included universities with a verified current relationship, and the school-ID set represented by `affiliations[]` must match the primary plus additional IDs exactly. Each affiliation records `schoolId`, `institution`, `faculty`, `department`, precise `relationship`, `role`, and source IDs; use an explicit `not_applicable` marker rather than leaving a required unit field blank. For an affiliation assigned to an additional school, at least one cited current `official_institution` source with the `current_role` claim domain must include both the candidate ID and that additional school ID in `subjectIds`. Two separately bound sources cannot be combined to meet this requirement. Keep the legacy scalar `faculty`, `department`, and `affiliatedInstitution` only as a concise compatibility summary; do not use it to erase cross-school or hospital distinctions.
 
@@ -434,6 +546,8 @@ Every `direct` or `adjacent` person-topic attribution needs a source-specific cl
 `confidenceByClaim` is authoritative and must include `currentRole`, `contact`, `research`, `supervision`, and `recruitment`, each as `high`, `medium`, `low`, `unverified`, or `not_applicable`. The legacy scalar `confidence` is optional and deprecated. `claimSourceIds` provides field-level traceability for `group`, `academicRole`, `adminClinicalRole`, `focus`, `phdTypes`, `doctoralRoute`, `directionOverviewZh`, `structuredProfileZh`, `scientificQuestions`, `materialsModels`, `methods`, `validationMaturity`, and `roleBoundary`; include every field that carries a material claim. For the three current-role fields, every cited source must be current, official-institution, candidate-bound and carry a compatible `personRoles[].roleType` plus retained wording appropriate to that field: `programme_host` is allowed only for `adminClinicalRole`; project/trial/grant/publication/collaboration/team-member/doctoral-supervision roles cannot support any of the three. A source label that expressly says the specific title was not retained cannot support these fields or a concrete `affiliations[].role`. Do not copy all `currentRoleSourceIds` into all three fields.
 
 For A-tier application-readiness facts, `applicationClaimSourceIds` maps contact protocol, application window, eligibility, required documents, proposal requirement, funding model, supervision setup, and general applicant fit to claim-appropriate evidence. Generic programme pages may support rules but not person-level supervision. `researchGap`, `proposedAim`, and `generalApplicantFit` are bounded analyst syntheses, each explicitly marked by its corresponding `...AnalystDerived: true` flag; their research basis still needs candidate-bound evidence. They are writing inputs, not approved projects or applicant-specific prose. The legacy aggregate `applicationSourceIds`, `proposalSourceIds`, and `fundingSourceIds` remain for compatibility but do not replace field-level mapping.
+
+`applicationReadiness.documentRequirements` is a backward-compatible optional array usable for every A/B/C candidate, independently of whether the candidate receives an A-tier deep profile. Each object records `routeId`, controlled `materialType`, `requirementStatus`, `submissionStage`, non-empty `summary`, `formatAndLength`, `submissionMethod`, positive-integer-or-null `quantity`, controlled `submitter`, ISO `checkedAt` and `sourceIds`. The full enums and evidence rules are in `application-materials-checklist.md`. The route ID must belong to the same candidate's opportunities. Asserted required/optional/conditional/not-required states need appropriate current official candidate- or school-bound sources accessed no later than the check date. `not_public`/`unverified` may be source-free. Do not infer not-required from omission or force PI enquiry into a formal-upload document. Avoid duplicate same route/type/stage rows; use the actual stage when a rule changes at shortlisting or offer. Missing-state rows keep uncertainty visible, not zero counts or implied exemptions.
 
 `opportunities[]` is authoritative for parallel routes. Each item uses a unique lowercase slug `id`; `scope` = `person`, `lab`, or `programme`; one of the eight opportunity statuses; non-empty `routeName` and `contactPolicy`; `deadlineType` = `fixed`, `rolling`, `until_filled`, `not_stated`, or `not_applicable`; a deadline value when applicable; and source IDs. The legacy `opportunityDetail` field is unsupported in strict schema 1.2 and must remain blank; put route-specific details in `opportunities[].contactPolicy`. The compatibility summary `opportunityStatus` must equal one status represented in the array, `opportunityDeadline` must match the summarized fixed-date route when one exists, and `recruitmentSourceIds` must include all opportunity and recruitment-audit sources. These summary fields must not upgrade a programme route into a person-specific vacancy.
 
@@ -494,7 +608,7 @@ Each evidence record:
 }
 ```
 
-Each record has one mutually exclusive primary `type`; use `claimDomains` to record every claim family actually supported by the page: `ranking`, `school_structure`, `research`, `current_role`, `contact`, `doctoral_rule`, `doctoral_supervision`, `admissions_funding`, `recruitment`, `conflict`, or the discovery-only `discovery`. `doctoral_rule_supervision` may support `doctoral_rule`, `doctoral_supervision`, or both, but only when the page actually carries that claim; it cannot prove a personal current title, contact, or direct research line unless the page explicitly states that person-specific fact. `subjectIds` lists the stable school/candidate IDs explicitly named by the source. It is mandatory for person-level role, affiliation, personal/clinical contact, research, direct-evidence, and research-anchor claims; a generic programme page does not bind those claims to a person. `personRoles[]` maps each person subject through `subjectId`, `roleType`, verbatim or tightly faithful `exactLabel`, and person-specific `topicRelevance`; never concatenate unscoped roles from several people into one scalar. Allowed role types are `subject_profile`, `group_leader`, `independent_faculty`, `unit_head`, `principal_investigator`, `co_principal_investigator`, `co_investigator`, `principal_applicant`, `co_applicant`, `grant_applicant`, `grant_recipient`, `trial_responsible_investigator`, `sub_investigator`, `collaborator`, `team_member`, `senior_or_corresponding_author`, `first_author`, `coauthor`, `mentioned_without_role`, `named_investigator`, `programme_host`, `eligible_supervisor`, `doctoral_supervisor`, and `co_supervisor`. Use the page's own distinction: an applicant, co-applicant, award recipient, sub-investigator, collaborator, or team member is not a PI unless the same source explicitly says so. Authorship is person-specific: another person's last/corresponding label cannot upgrade the candidate, while explicit equal-contribution/co-senior wording is valid. Use `mentioned_without_role` when a source names a person but does not establish the desired role; a source that does not name the person must not carry that person's ID or role. `exactLabel` must contain the actual role wording or a narrow faithful paraphrase, not migration placeholders such as `role described on page`, `named profile/group member`, `Candidate-associated official research URL`, `Candidate-bound official profile/contact URL`, or `anchor attribution is described in the linked source`. `topicRelevance: direct` is invalid when the same person's label or the source claim explicitly says the work is not/non-lung or that lung cancer is not that person's research line. `authorityClass` and `medium` are mandatory and must match the actual publisher and carrier, not the desired claim. The special `discovery_lead` source type uses only `claimDomains: ["discovery"]`, scalar/person topic `not_applicable`, `mentioned_without_role`, and the fixed transparent label `Discovery lead only; legacy association not used as role/topic evidence`; it may appear only in `case.supportingSourceIds` or `case.discoveryPasses[].sourceIds`, never in substantive evidence fields. A discovery-pass citation records how a candidate entered the pool and does not validate any role, topic, contact, affiliation, supervision, recruitment, or ranking claim.
+Each record has one mutually exclusive primary `type`; use `claimDomains` to record every claim family actually supported by the page: `ranking`, `school_structure`, `research`, `current_role`, `contact`, `doctoral_rule`, `doctoral_supervision`, `admissions_funding`, `recruitment`, `conflict`, or the discovery-only `discovery`. `doctoral_rule_supervision` may support `doctoral_rule`, `doctoral_supervision`, or both, but only when the page actually carries that claim; it cannot prove a personal current title, contact, or direct research line unless the page explicitly states that person-specific fact. `subjectIds` lists the stable school/candidate IDs explicitly named by the source. It is mandatory for person-level role, affiliation, personal/clinical contact, research, direct-evidence, and research-anchor claims; a generic programme page does not bind those claims to a person. `personRoles[]` maps each person subject through `subjectId`, `roleType`, verbatim or tightly faithful `exactLabel`, and person-specific `topicRelevance`; never concatenate unscoped roles from several people into one scalar. Allowed role types are `subject_profile`, `group_leader`, `independent_faculty`, `unit_head`, `principal_investigator`, `co_principal_investigator`, `co_investigator`, `principal_applicant`, `co_applicant`, `grant_applicant`, `grant_recipient`, `trial_responsible_investigator`, `sub_investigator`, `collaborator`, `team_member`, `senior_or_corresponding_author`, `first_author`, `coauthor`, `mentioned_without_role`, `named_investigator`, `programme_host`, `eligible_supervisor`, `doctoral_supervisor`, and `co_supervisor`. Use the page's own distinction: an applicant, co-applicant, award recipient, sub-investigator, collaborator, or team member is not a PI unless the same source explicitly says so. Authorship is person-specific: another person's last/corresponding label cannot upgrade the candidate, while explicit equal-contribution/co-senior wording is valid. Use `mentioned_without_role` when a source names a person but does not establish the desired role; a source that does not name the person must not carry that person's ID or role. `exactLabel` must contain the actual role wording or a narrow faithful paraphrase, not migration placeholders such as `role described on page`, `named profile/group member`, `Candidate-associated official research URL`, `Candidate-bound official profile/contact URL`, or `anchor attribution is described in the linked source`. In `lung_cancer`, `topicRelevance: direct` is invalid when the same person's label or source claim expressly negates a lung/thoracic research line. In `cv_aligned_oncology`, non-lung disease is allowed when a positive approved cancer axis is supported; an overall non-oncology claim or generic methods with no cancer anchor cannot be direct. A negated lung statement alone is not a positive broad oncology anchor. `authorityClass` and `medium` are mandatory and must match the actual publisher and carrier, not the desired claim. The special `discovery_lead` source type uses only `claimDomains: ["discovery"]`, scalar/person topic `not_applicable`, `mentioned_without_role`, and the fixed transparent label `Discovery lead only; legacy association not used as role/topic evidence`; it may appear only in `case.supportingSourceIds` or `case.discoveryPasses[].sourceIds`, never in substantive evidence fields. A discovery-pass citation records how a candidate entered the pool and does not validate any role, topic, contact, affiliation, supervision, recruitment, or ranking claim.
 
 The URL's publishing host, `authorityClass`, and primary `type` must agree. Publication hosts such as PubMed, PMC, Europe PMC, and DOI resolvers cannot be encoded as `official_institution`; ClinicalTrials.gov must remain a trial-registry authority, SNSF a funder authority, and QS/TopUniversities a ranking-publisher authority. These pages may expose affiliations, correspondence emails, investigators, awards, or institutional names, but they do not thereby become current institutional role/contact profiles.
 
@@ -528,9 +642,13 @@ Group by school, then A/B/C/D. Include at least:
 | Name/group/ID | Universities, faculties, departments, and institutional relationships | Research focus and overview | Academic role | Administrative/clinical role | Published contact, type, and source | Topic/Supervision/Tier | Suitable PhD types | Doctoral route | Scoped opportunities | Sources and cautions |
 |---|---|---|---|---|---|---|---|---|---|---|
 
+For every row, render the faculty/department/unit, academic and administrative/clinical appointment, and research focus/direction in Chinese. Chinese comes first; the verified official label may follow in parentheses. Never emit only the untranslated source string in these columns. If a value is unavailable, show `未公开` or `未核实` and the applicable caution/source boundary.
+
 ### `03-COVERAGE-MATRIX.md`
 
 Show every school and coverage area, units inspected, result, candidates found, evidence, and access limitations.
+
+Render `coverage[].notes` visibly, including the name/unit, reason and source IDs for institutionally excluded or unresolved leads. An existing engineering/data branch with no eligible candidates is `searched`, not `not_present`. The candidate table and its tier counts must not reintroduce these names as D-tier targets.
 
 ### `04-EVIDENCE-CONFLICTS.md`
 
@@ -551,11 +669,17 @@ For every A-tier record include:
 
 ### `06-APPLICATION-READINESS.md`
 
+Begin with the sourced application-materials matrix for all A/B/C candidates and their viable routes. Display official document names/type, required/optional/conditional/explicitly-not-required/missing status, stage, number, applicant/referee submission, format/length/method, check date and sources. Distinguish PI enquiry or supervisor consent from programme materials. If a legacy case lacks the structured audit, display that limitation instead of saying documents are unnecessary.
+
 For every A-tier record include contact protocol, application window, eligibility, required documents, proposal rules, funding model, supervision setup, doctoral route, every scoped opportunity, the dated recruitment audit, safest sourced `researchAnchor`, evidence-based `researchGap`, bounded `proposedAim`, general-fit backgrounds, resource/supervision/funding questions, and cautions. Mark gap, aim, and general fit as analyst-derived and state that they are not approved projects or personal-fit claims. This is a data-only handoff: no string anywhere in `applicationReadiness`, or in any doctoral work-package field, may contain an email subject, salutation, sign-off, first-person application request, CV-attachment sentence, personalized fit prose, or full proposal prose.
 
 ### `07-SOURCE-LEDGER.md`
 
 List every evidence record exactly once with type, claim domains, subject IDs, authority class, medium, work ID/identifiers, title, publisher, dates, claim, person role, relevance, status, and direct URL.
+
+### Optional `08-CONTACT-AUDIT.md`
+
+Render this file only when `data/contact-audit.json` exists. Show every audited candidate, check date, current institution in Chinese, ordered official-first search steps, every channel's type/value/owner/currentness/source, preferred route, contact-policy boundary, cautions, and whether same-day rechecking is required. The index must link it. A publication-only email is always visibly labelled as publication-time evidence, never as a current official personal mailbox.
 
 ## 5. Length and evidence requirements
 
@@ -564,10 +688,10 @@ List every evidence record exactly once with type, claim domains, subject IDs, a
 - Do not claim the direction overview itself exceeds 500 characters.
 - A-tier: at least one current official role source and normally two direct recent topic-evidence sources.
 - Count independent direct evidence by underlying `workId`, not merely by source ID, URL, or one landing page's identifier. A and T4 are incompatible; lower the tier or correct topic directness.
-- T3: at least one current official candidate-bound research/project record with person-specific `topicRelevance: direct`; a historical paper or merely adjacent platform cannot establish a current lung-cancer application.
+- T3: at least one current official candidate-bound research/project record with person-specific `topicRelevance: direct`; a historical paper or merely adjacent platform cannot establish a current in-profile application (lung cancer in narrow mode, an approved oncology axis in broad mode).
 - B/C candidates also need at least one topic-evidence source appropriate to the claimed fit.
 - Every candidate: at least one current role source or explicit unverified/D-tier status.
-- Every contact: candidate- or school-bound source ID, or a blank/source-free `not_public` marker.
+- Every strict-schema contact: candidate- or school-bound source ID, or a blank/source-free `not_public` marker. When `contact-audit.json` exists, each real supplemental channel also has owner, currentness, a unique channel ID, and at least one valid source ID; its preferred channel ID resolves within the same candidate record.
 - Every route is represented in `opportunities[]`; a programme-, lab-, and person-level route remain distinguishable.
 - Every `open_current` opportunity: at least one current official vacancy source. For `scope: person`, that source explicitly names the candidate and includes the candidate ID in `subjectIds`; until a separately validated lab registry exists in the schema, a `scope: lab` opening must also be candidate-bound. A `fixed` deadline requires a future ISO date; `rolling` and `until_filled` require explicit official wording.
 - Every `route_confirmed_no_vacancy`, `no_public_evidence`, or `direct_enquiry_recommended` summary or route: a dated, sourced `recruitmentAudit` across person/lab/programme official pages or portals.
@@ -593,3 +717,10 @@ Before delivery, verify:
 10. All generated Markdown links resolve locally.
 11. Every included school and candidate ID is visibly represented in the rendered outputs.
 12. No outreach-email, cover-letter, applicant-specific pitch, or full research-proposal content appears.
+13. Every retained candidate passes the institutional eligibility and research-direction gates or has an explicit recorded user exception; confirmed exclusions and unresolved nuclear-medicine/imaging leads remain in sourced coverage notes outside the roster and candidate counts. Manually check whether paediatric or haematologic oncology is the main/predominant focus of the person's overall current programme, and separately check current core/parallel nuclear-medicine and radiomics/imaging lines, using `candidate-exclusions.md`. A retained parallel/secondary or dominance-unresolved paediatric/haematologic line needs a dated balance note but is not an exception. Schema validation and positive-topic anchor regexes alone establish neither faculty eligibility nor research-direction eligibility.
+14. The selected topic profile and actual disease/axis are visible; broad-profile candidates have a manual approved-axis check and no invented lung link. L1–L3 preferences, T evidence quality, A–D readiness, applicant skill gaps and opportunity/funding status remain separate.
+    Every recommended A/B/C candidate also has a dated oncology-relevance statement in `notes`, retaining disease/model or cancer-risk endpoint, cancer-specific question, current official source IDs, primary-literature cross-check and actual person role. Classify current programme leadership and current project participation separately using `candidate-exclusions.md`; non-oncology or unresolved relevance is not rescued by method overlap or a cancer-institute affiliation.
+15. New cases require a route-specific materials audit for every A/B/C candidate; motivation/SOP, PI pre-contact, reference letters and proposals are not inferred from another route or a visible email address. Keep missing states explicit and confirm count, submitter, format, stage and source date.
+16. No candidate is excluded, deleted, or downgraded solely because a current vacancy could not be verified, no public opening was found, a call is closed, or recruitment is `unverified`. Recruitment/opportunity state remains separate from research eligibility, topic/supervision evidence, priority tier, and any correspondence-based outreach hold.
+17. Every user-facing supervisor row or profile has substantive Chinese values for faculty/department/unit, current appointment/title, and research direction. Chinese headings with English-only values fail this check. Official labels may follow the Chinese rendering, and an unavailable fact is shown with an explicit Chinese missing marker rather than a blank or invented translation.
+18. If `data/contact-audit.json` exists, `08-CONTACT-AUDIT.md` exists and is linked from the index; every candidate/channel/source reference resolves, official fallbacks precede paper searching, `preferredChannelId` names a usable channel, and `not_public` never coexists with a form, organizational mailbox, phone, or other valued route.

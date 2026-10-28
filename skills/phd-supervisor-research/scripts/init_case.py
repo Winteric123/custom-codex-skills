@@ -12,7 +12,38 @@ import sys
 import unicodedata
 from pathlib import Path
 
-from case_utils import COVERAGE_AREA_ORDER
+from case_utils import (
+    COVERAGE_AREA_ORDER,
+    DEFAULT_TOPIC_BY_PROFILE,
+    DEFAULT_TOPIC_PROFILE,
+    TOPIC_PROFILES,
+    resolve_topic_profile,
+)
+
+
+DEFAULT_SCREENING_LIMITATIONS = (
+    "Every recommended A/B/C candidate needs current person-specific oncology relevance: "
+    "an official cancer disease/model/cohort or cancer-risk endpoint, cancer-specific question "
+    "and actual role, cross-checked with primary literature. Distinguish a direct current "
+    "programme from current cancer-project participation. Generic omics/immunology/mechanisms, "
+    "institutional affiliation or a historical collaboration alone is insufficient; retain "
+    "the dated audit and source IDs in notes. Unresolved/non-oncology leads are not recommendations.",
+    "Default research exclusions in both topic profiles: exclude paediatric/childhood oncology "
+    "or haematologic malignancies only when current person-specific evidence shows they are the "
+    "main or predominant focus of the person's overall current programme; a co-equal parallel, "
+    "secondary or collaborative line does not itself exclude an otherwise eligible candidate, "
+    "and unresolved dominance is retained with a dated caution. Separately exclude nuclear "
+    "medicine/radionuclide diagnosis or therapy and radiomics/core clinical or molecular tumour "
+    "imaging when a current official programme shows a core or explicitly parallel research line. "
+    "Apply references/candidate-exclusions.md, record retained disease-line balance in candidate "
+    "notes, retain dated sourced coverage exclusion notes, and record explicit user overrides.",
+    "Default institutional gate: engineering-only, computer-science-only, standalone "
+    "AI/data-science/data-analytics, and pure mathematics/statistical-methods appointments "
+    "without a verified eligible biomedical/medical/hospital/cancer appointment are excluded. "
+    "Medical cancer bioinformatics, clinical biostatistics, computational pathology and "
+    "multi-omics may qualify after both gates pass. Positive-topic regexes and structural "
+    "validation do not independently prove these manual evidence checks.",
+)
 
 
 def write_json(path: Path, value: object) -> None:
@@ -56,8 +87,14 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--schools", default="", help="Semicolon-separated school names; omit for QS top-300 scope")
     parser.add_argument(
         "--topic",
-        default="thoracic oncology, especially lung cancer",
-        help="Research topic",
+        default=None,
+        help="Research topic display text; omitted text uses the selected profile default",
+    )
+    parser.add_argument(
+        "--topic-profile",
+        choices=sorted(TOPIC_PROFILES),
+        default=DEFAULT_TOPIC_PROFILE,
+        help="Evidence topic scope; defaults to the legacy lung-cancer profile",
     )
     parser.add_argument("--as-of", default=dt.date.today().isoformat(), help="Verification date, YYYY-MM-DD")
     parser.add_argument("--intake", default="", help="Optional target intake")
@@ -68,6 +105,10 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> int:
     args = parse_args()
+    topic = DEFAULT_TOPIC_BY_PROFILE[args.topic_profile] if args.topic is None else args.topic.strip()
+    if not topic:
+        print("--topic must not be blank", file=sys.stderr)
+        return 2
     try:
         as_of_date = dt.date.fromisoformat(args.as_of)
     except ValueError:
@@ -96,9 +137,13 @@ def main() -> int:
             scope_material = "\x1f".join(sorted(normalized_schools))
             scope_hash = hashlib.sha1(scope_material.encode("utf-8")).hexdigest()[:8]
             scope_suffix = f"-schools-{scope_hash}"
+        topic_suffix = "lung-cancer"
+        if args.topic_profile == "cv_aligned_oncology":
+            topic_hash = hashlib.sha1(topic.encode("utf-8")).hexdigest()[:8]
+            topic_suffix = f"cv-oncology-{topic_hash}"
         dirname = (
             f"{slugify(args.location, 'region')}{scope_suffix}"
-            f"-lung-cancer-phd-supervisors-{as_of}"
+            f"-{topic_suffix}-phd-supervisors-{as_of}"
         )
         case_dir = (workspace / "outputs" / dirname).resolve()
 
@@ -116,17 +161,26 @@ def main() -> int:
     if sentinel.exists():
         if args.resume:
             existing = json.loads(sentinel.read_text(encoding="utf-8"))
+            try:
+                existing_profile = resolve_topic_profile(existing)
+            except ValueError as exc:
+                print(str(exc), file=sys.stderr)
+                return 4
             expected_scope = "named_schools" if schools_input else "qs_top_300"
             mismatches = []
             for field, supplied in [
                 ("location", args.location.strip()),
-                ("topic", args.topic.strip()),
+                ("topic", topic),
                 ("intake", args.intake.strip()),
                 ("asOf", as_of),
                 ("scopeMode", expected_scope),
             ]:
                 if str(existing.get(field, "")) != supplied:
                     mismatches.append(f"{field}: existing={existing.get(field)!r}, supplied={supplied!r}")
+            if existing_profile != args.topic_profile:
+                mismatches.append(
+                    f"topicProfile: existing={existing_profile!r}, supplied={args.topic_profile!r}"
+                )
             existing_requested = existing.get("requestedSchools", [])
             if not isinstance(existing_requested, list) or sorted(
                 normalize_scope_name(str(name)) for name in existing_requested
@@ -153,7 +207,9 @@ def main() -> int:
     case = {
         "schemaVersion": "1.2",
         "location": args.location.strip(),
-        "topic": args.topic.strip(),
+        "topic": topic,
+        "topicProfile": args.topic_profile,
+        "applicationMaterialsAuditRequired": True,
         "asOf": as_of,
         "intake": args.intake.strip(),
         "scopeMode": "named_schools" if schools_input else "qs_top_300",
@@ -179,7 +235,7 @@ def main() -> int:
         },
         "status": "draft",
         "discoveryPasses": [],
-        "limitations": [],
+        "limitations": list(DEFAULT_SCREENING_LIMITATIONS),
     }
     schools = []
     base_ids = [slugify(name, "institution") for name in schools_input]
